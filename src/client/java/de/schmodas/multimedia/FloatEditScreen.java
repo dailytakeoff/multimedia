@@ -99,6 +99,8 @@ public class FloatEditScreen extends Screen {
 				() -> screen.yaw -= 15, () -> screen.yaw += 15);
 		y = stepper(y, "Tilt", () -> Math.round(screen.tilt) + "°",
 				() -> screen.tilt = Math.max(-90, screen.tilt - 5), () -> screen.tilt = Math.min(90, screen.tilt + 5));
+		y = stepper(y, "Up / down", () -> String.format(Locale.ROOT, "height %.2f", screen.y),
+				() -> screen.y = Math.round((screen.y - 0.25) * 100) / 100.0, () -> screen.y = Math.round((screen.y + 0.25) * 100) / 100.0);
 		this.addRenderableWidget(Button.builder(Component.literal("Move to where I'm looking"), b -> FloatingScreens.placeInFront(screen))
 				.bounds(left, y, 152, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Turn to face me"), b -> FloatingScreens.faceMe(screen))
