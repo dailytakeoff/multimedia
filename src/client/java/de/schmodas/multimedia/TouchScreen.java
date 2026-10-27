@@ -11,7 +11,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -253,20 +253,18 @@ public class TouchScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if (event.key() == GLFW.GLFW_KEY_ESCAPE || !controlling()) {
+		if (event.key() == InputConstants.KEY_ESCAPE || !controlling()) {
 			return super.keyPressed(event);
 		}
 		String name = keyName(event.key());
-		int mods = event.modifiers();
-		boolean ctrl = (mods & GLFW.GLFW_MOD_CONTROL) != 0;
-		boolean alt = (mods & GLFW.GLFW_MOD_ALT) != 0;
-		boolean sup = (mods & GLFW.GLFW_MOD_SUPER) != 0;
-		boolean shift = (mods & GLFW.GLFW_MOD_SHIFT) != 0;
+		boolean ctrl = event.hasControlDown();
+		boolean alt = event.hasAltDown();
+		boolean shift = event.hasShiftDown();
 		if (name == null) {
 			return true;
 		}
 		boolean printable = name.length() == 1 || name.equals("space");
-		if (printable && !ctrl && !alt && !sup) {
+		if (printable && !ctrl && !alt) {
 			return true; // comes as text via charTyped (keeps the keyboard layout right)
 		}
 		StringBuilder combo = new StringBuilder();
@@ -278,9 +276,6 @@ public class TouchScreen extends Screen {
 		}
 		if (alt) {
 			combo.append("alt+");
-		}
-		if (sup) {
-			combo.append("super+");
 		}
 		combo.append(name);
 		feed.sendInput("key " + combo);
@@ -298,41 +293,40 @@ public class TouchScreen extends Screen {
 	}
 
 	private static String button(int b) {
-		return switch (b) {
-			case GLFW.GLFW_MOUSE_BUTTON_LEFT -> "l";
-			case GLFW.GLFW_MOUSE_BUTTON_RIGHT -> "r";
-			case GLFW.GLFW_MOUSE_BUTTON_MIDDLE -> "m";
-			default -> null;
-		};
+		if (b == InputConstants.MOUSE_BUTTON_LEFT) {
+			return "l";
+		}
+		if (b == InputConstants.MOUSE_BUTTON_RIGHT) {
+			return "r";
+		}
+		if (b == InputConstants.MOUSE_BUTTON_MIDDLE) {
+			return "m";
+		}
+		return null;
 	}
 
 	private static String keyName(int key) {
-		if (key >= GLFW.GLFW_KEY_A && key <= GLFW.GLFW_KEY_Z) {
-			return String.valueOf((char) ('a' + key - GLFW.GLFW_KEY_A));
+		if (key >= InputConstants.KEY_A && key <= InputConstants.KEY_Z) {
+			return String.valueOf((char) ('a' + key - InputConstants.KEY_A));
 		}
-		if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
-			return String.valueOf((char) ('0' + key - GLFW.GLFW_KEY_0));
+		if (key >= InputConstants.KEY_0 && key <= InputConstants.KEY_9) {
+			return String.valueOf((char) ('0' + key - InputConstants.KEY_0));
 		}
-		if (key >= GLFW.GLFW_KEY_F1 && key <= GLFW.GLFW_KEY_F12) {
-			return "f" + (key - GLFW.GLFW_KEY_F1 + 1);
+		if (key >= InputConstants.KEY_F1 && key <= InputConstants.KEY_F12) {
+			return "f" + (key - InputConstants.KEY_F1 + 1);
 		}
-		return switch (key) {
-			case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> "enter";
-			case GLFW.GLFW_KEY_BACKSPACE -> "backspace";
-			case GLFW.GLFW_KEY_TAB -> "tab";
-			case GLFW.GLFW_KEY_SPACE -> "space";
-			case GLFW.GLFW_KEY_DELETE -> "delete";
-			case GLFW.GLFW_KEY_INSERT -> "insert";
-			case GLFW.GLFW_KEY_HOME -> "home";
-			case GLFW.GLFW_KEY_END -> "end";
-			case GLFW.GLFW_KEY_PAGE_UP -> "pageup";
-			case GLFW.GLFW_KEY_PAGE_DOWN -> "pagedown";
-			case GLFW.GLFW_KEY_LEFT -> "left";
-			case GLFW.GLFW_KEY_RIGHT -> "right";
-			case GLFW.GLFW_KEY_UP -> "up";
-			case GLFW.GLFW_KEY_DOWN -> "down";
-			default -> null;
-		};
+		int[] codes = {InputConstants.KEY_RETURN, InputConstants.KEY_NUMPADENTER, InputConstants.KEY_BACKSPACE,
+				InputConstants.KEY_TAB, InputConstants.KEY_SPACE, InputConstants.KEY_DELETE, InputConstants.KEY_INSERT,
+				InputConstants.KEY_HOME, InputConstants.KEY_END, InputConstants.KEY_PAGEUP, InputConstants.KEY_PAGEDOWN,
+				InputConstants.KEY_LEFT, InputConstants.KEY_RIGHT, InputConstants.KEY_UP, InputConstants.KEY_DOWN};
+		String[] names = {"enter", "enter", "backspace", "tab", "space", "delete", "insert", "home", "end", "pageup",
+				"pagedown", "left", "right", "up", "down"};
+		for (int i = 0; i < codes.length; i++) {
+			if (codes[i] == key) {
+				return names[i];
+			}
+		}
+		return null;
 	}
 
 	@Override
