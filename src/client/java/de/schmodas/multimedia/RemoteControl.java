@@ -100,6 +100,33 @@ public final class RemoteControl {
 		});
 	}
 
+	/**
+	 * Your own shared screen, touched on this PC: no permission needed. Only clicks, scrolling and keys – no
+	 * hover moves, which would fight with your real mouse. On Windows the pointer jumps back after a click.
+	 */
+	static void localEvent(String event) {
+		TvSender s = TvSender.current();
+		if (s == null || !TvSender.isSending() || event.startsWith("move") || event.equals("req")) {
+			return;
+		}
+		Injector inj = injector();
+		if (inj == null) {
+			return;
+		}
+		if (event.startsWith("up ")) {
+			return; // the click is done in one go below – Minecraft may lose focus before the release arrives
+		}
+		if (event.startsWith("down ")) {
+			String[] p = event.split(" ");
+			inj.savePointer();
+			inj.handle(s, event);
+			inj.handle(s, "up " + p[1]);
+			inj.restorePointer();
+			return;
+		}
+		inj.handle(s, event);
+	}
+
 	/** /mm control allow <player> */
 	public static boolean allow(String name) {
 		if (!TvSender.isSending()) {
@@ -323,6 +350,13 @@ public final class RemoteControl {
 
 		abstract void close();
 
+		/** Remember / go back to where the real pointer was (own screen only; may do nothing). */
+		void savePointer() {
+		}
+
+		void restorePointer() {
+		}
+
 		void handle(TvSender s, String event) {
 			String[] parts = event.split(" ", 2);
 			String cmd = parts[0];
@@ -487,6 +521,16 @@ public final class RemoteControl {
 		@Override
 		void releaseAll() {
 			send("release");
+		}
+
+		@Override
+		void savePointer() {
+			send("save");
+		}
+
+		@Override
+		void restorePointer() {
+			send("restore");
 		}
 
 		@Override

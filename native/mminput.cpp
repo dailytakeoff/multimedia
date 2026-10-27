@@ -10,6 +10,7 @@
 //   key <combo>      e.g. "enter", "ctrl+c", "alt+f4", "shift+tab"
 //   text <base64>    type UTF-8 text
 //   release          let go of all mouse buttons and modifier keys
+//   save / restore   remember / go back to the pointer position (touching your own screen)
 //
 // Build (MinGW-w64): see scripts/build-audio-helper.sh
 
@@ -24,6 +25,8 @@
 
 static RECT g_mon = {0, 0, 0, 0};
 static bool g_held[3] = {false, false, false};
+static POINT g_saved = {0, 0};
+static bool g_hasSaved = false;
 
 static void dpiAware() {
 	// physical pixels, like DXGI – per-monitor v2 if available (Windows 10 1703+), else system aware
@@ -223,6 +226,13 @@ int main() {
 			typeText(b64decode(arg));
 		} else if (cmd == "release") {
 			releaseAll();
+		} else if (cmd == "save") {
+			g_hasSaved = GetCursorPos(&g_saved) != 0;
+		} else if (cmd == "restore") {
+			if (g_hasSaved) {
+				Sleep(30); // let the click land first
+				SetCursorPos(g_saved.x, g_saved.y);
+			}
 		}
 	}
 	releaseAll();

@@ -127,18 +127,33 @@ final class LiveFeed {
 
 	/** Is there a direct connection to a friend's screen right now (needed for remote control)? */
 	boolean canSendInput() {
+		if (isLocal()) {
+			return !cam && TvSender.isSending();
+		}
 		return liveEndpoint != null && livePeer != null && !cam;
 	}
 
+	/** Your own screen share (viewed on this PC): you may always control it, no permission needed. */
+	boolean isLocal() {
+		return "127.0.0.1".equals(target.host());
+	}
+
 	String controlState() {
-		return control;
+		return isLocal() ? "granted" : control;
 	}
 
 	/** Sends one touch / remote-control event to the sender (see RemoteControl for the format). */
 	void sendInput(String event) {
+		if (cam) {
+			return;
+		}
+		if (isLocal()) {
+			RemoteControl.localEvent(event);
+			return;
+		}
 		P2p.Endpoint ep = liveEndpoint;
 		InetSocketAddress to = livePeer;
-		if (ep == null || to == null || cam) {
+		if (ep == null || to == null) {
 			return;
 		}
 		byte[] text = event.getBytes(StandardCharsets.UTF_8);

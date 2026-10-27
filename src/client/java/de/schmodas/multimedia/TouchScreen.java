@@ -118,7 +118,16 @@ public class TouchScreen extends Screen {
 					.bounds(cx + 44, y, 62, 20).build());
 			return;
 		}
-		if (remote()) {
+		if (remote() && feed.isLocal()) {
+			Button esc = Button.builder(Component.literal("Esc"), b -> feed.sendInput("key escape"))
+					.bounds(cx - 154, y, 60, 20).tooltip(Tooltip.create(Component.literal("Sends Escape to your PC"))).build();
+			esc.active = controlling();
+			this.addRenderableWidget(esc);
+			Button altTab = Button.builder(Component.literal("Alt+Tab"), b -> feed.sendInput("key alt+tab"))
+					.bounds(cx - 90, y, 60, 20).build();
+			altTab.active = controlling();
+			this.addRenderableWidget(altTab);
+		} else if (remote()) {
 			requestButton = Button.builder(Component.literal("✋ Request control"), b -> {
 				feed.sendInput("req");
 				rebuildWidgets();
@@ -187,6 +196,10 @@ public class TouchScreen extends Screen {
 		}
 		if (!remote()) {
 			return source == null ? "Nothing playing on this screen" : "Live screen";
+		}
+		if (feed.isLocal()) {
+			return feed.canSendInput() ? "Your screen – tap to click on your PC (it then gets focus), scroll, type"
+					: "Your screen – start sharing to control it from here";
 		}
 		if (!feed.canSendInput()) {
 			return feed.sender + "'s screen – remote control works once connected directly";
