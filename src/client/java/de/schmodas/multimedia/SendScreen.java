@@ -40,6 +40,14 @@ public class SendScreen extends Screen {
 	/** true: es wird schon gesendet, hier nur ändern (Zuschauer bleiben verbunden). */
 	private final boolean change;
 
+	private static final boolean WINDOWS = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win");
+	/** Share one app window instead of a whole monitor. */
+	private boolean appMode = Settings.tvWindow() != null;
+	/** Chosen app window title (Windows). */
+	private String app = Settings.tvWindow() != null && !Settings.tvWindow().equals("*") ? Settings.tvWindow() : null;
+	private final List<String> apps = new ArrayList<>();
+	private volatile boolean appsLoading;
+
 	public SendScreen() {
 		this(false);
 	}
@@ -67,6 +75,9 @@ public class SendScreen extends Screen {
 			programs.add(program);
 		}
 		loadPreviews();
+		if (WINDOWS) {
+			loadApps();
+		}
 		Thread t = new Thread(() -> {
 			List<String> found = TvSender.audioPrograms();
 			Minecraft.getInstance().execute(() -> {
@@ -115,6 +126,24 @@ public class SendScreen extends Screen {
 		});
 	}
 
+	private void loadApps() {
+		appsLoading = true;
+		Thread t = new Thread(() -> {
+			List<String> found = TvSender.appWindows();
+			Minecraft.getInstance().execute(() -> {
+				apps.clear();
+				apps.addAll(found);
+				if (app == null && !apps.isEmpty()) {
+					app = apps.get(0);
+				}
+				appsLoading = false;
+				rebuildWidgets();
+			});
+		}, "MultiMedia-Apps");
+		t.setDaemon(true);
+		t.start();
+	}
+
 	private int previewTop() {
 		return 46;
 	}
@@ -128,6 +157,30 @@ public class SendScreen extends Screen {
 	@Override
 	protected void init() {
 		int y = previewTop() + PREVIEW_H + 30;
+		// whole monitor or one app
+		this.addRenderableWidget(Button.builder(Component.literal(appMode ? "Share: one app ▸" : "Share: whole monitor ▸"), b -> {
+			appMode = !appMode;
+			rebuildWidgets();
+		}).bounds(this.width / 2 - 154, y, 308, 20).tooltip(Tooltip.create(Component.literal(appMode
+				? "Only that app's window is sent – your other windows stay private."
+				: "Everything on the chosen monitor is sent."))).build());
+		if (appMode && WINDOWS) {
+			String label = appsLoading ? "Looking for apps …" : apps.isEmpty() ? "No app windows found – ↻"
+					: "App: " + (app == null ? "?" : app.length() > 40 ? app.substring(0, 39) + "…" : app) + "  ▸";
+			this.addRenderableWidget(Button.builder(Component.literal(label), b -> {
+				if (apps.isEmpty()) {
+					loadApps();
+					return;
+				}
+				int i = app == null ? -1 : apps.indexOf(app);
+				app = apps.get((i + 1) % apps.size());
+				rebuildWidgets();
+			}).bounds(this.width / 2 - 154, previewTop() + PREVIEW_H / 2 - 10, 280, 20).tooltip(Tooltip.create(Component.literal(
+					"Click to pick the next app. Keep it open (not minimised) while sharing; if its title changes a lot, pick it again."))).build());
+			this.addRenderableWidget(Button.builder(Component.literal("↻"), b -> loadApps())
+					.bounds(this.width / 2 + 130, previewTop() + PREVIEW_H / 2 - 10, 24, 20).build());
+		}
+		y += 24;
 		// Ton
 		boolean withProgram = soundMode.equals("except") || soundMode.equals("only");
 		this.addRenderableWidget(Button.builder(Component.literal(soundLabel()), b -> {
@@ -179,7 +232,7 @@ public class SendScreen extends Screen {
 		y = Math.max(y + 6, this.height - 30);
 		Button start = Button.builder(Component.literal(change ? T.t("✔ Übernehmen") : T.t("▶ Senden starten")), b -> start())
 				.bounds(this.width / 2 - 154, this.height - 30, 150, 20).build();
-		start.active = !loading && loadError == null;
+		start.active = appMode ? (!WINDOWS || app != null) : !loading && loadError == null;
 		this.addRenderableWidget(start);
 		this.addRenderableWidget(Button.builder(Component.literal(T.t("Abbrechen")), b -> onClose())
 				.bounds(this.width / 2 + 4, this.height - 30, 150, 20).build());
@@ -207,6 +260,7 @@ public class SendScreen extends Screen {
 
 	private void start() {
 		int monitor = selected;
+		Settings.setTvWindow(appMode ? (WINDOWS ? app : "*") : null);
 		Settings.setTvMonitor(monitor);
 		Settings.setTvInvited(invite);
 		String sound = soundSetting();
@@ -235,7 +289,7 @@ public class SendScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		for (int i = 0; i < previews.size(); i++) {
+		for (int i = 0; i < (appMode ? 0 : previews.size()); i++) {
 			int x = previewLeft(i);
 			int y = previewTop();
 			if (event.x() >= x && event.x() < x + PREVIEW_W && event.y() >= y && event.y() < y + PREVIEW_H) {
@@ -250,14 +304,17 @@ public class SendScreen extends Screen {
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float a) {
 		super.extractRenderState(g, mouseX, mouseY, a);
 		g.centeredText(this.font, this.title, this.width / 2, 12, 0xFFFFFFFF);
-		g.centeredText(this.font, Component.literal(T.t("Welcher Monitor? (Alles, was darauf zu sehen ist, wird gesendet)")),
-				this.width / 2, 30, 0xFFAAAAAA);
-		if (loading) {
+		g.centeredText(this.font, Component.literal(appMode ? (WINDOWS ? "Which app? Only its window is sent." :
+				"One app: your desktop will ask which window to share when you start.")
+				: T.t("Welcher Monitor? (Alles, was darauf zu sehen ist, wird gesendet)")), this.width / 2, 30, 0xFFAAAAAA);
+		if (appMode) {
+			// no monitor previews in app mode (Windows shows the app picker there)
+		} else if (loading) {
 			g.centeredText(this.font, Component.literal(T.t("Suche Monitore …")), this.width / 2, previewTop() + PREVIEW_H / 2, 0xFFFFFFFF);
 		} else if (loadError != null) {
 			g.centeredText(this.font, Component.literal(loadError), this.width / 2, previewTop() + PREVIEW_H / 2, 0xFFFF5555);
 		}
-		for (int i = 0; i < previews.size(); i++) {
+		for (int i = 0; i < (appMode ? 0 : previews.size()); i++) {
 			int x = previewLeft(i);
 			int y = previewTop();
 			int border = i == selected ? 0xFF55FF55 : 0xFF555555;
@@ -266,7 +323,7 @@ public class SendScreen extends Screen {
 			g.centeredText(this.font, Component.literal(T.t("Monitor ") + (i + 1) + (i == selected ? " ✔" : "")), x + PREVIEW_W / 2,
 					y + PREVIEW_H + 6, i == selected ? 0xFF55FF55 : 0xFFAAAAAA);
 		}
-		int inviteTitle = previewTop() + PREVIEW_H + 30 + 42 - 13;
+		int inviteTitle = previewTop() + PREVIEW_H + 30 + 24 + 42 - 13;
 		g.centeredText(this.font, Component.literal(players.isEmpty() ? T.t("Niemand sonst online zum Einladen")
 				: T.t("Wen einladen? (Wer schon eingeladen war, braucht keine neue Einladung)")), this.width / 2, inviteTitle, 0xFFAAAAAA);
 	}

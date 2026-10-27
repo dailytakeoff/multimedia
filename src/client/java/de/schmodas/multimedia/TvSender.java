@@ -51,6 +51,8 @@ public final class TvSender {
 
 	private volatile int monitor;
 	private volatile String sound;
+	/** One app window instead of the monitor (see Settings.tvWindow), or null. */
+	private volatile String window = Settings.tvWindow(); // cleared in the constructor for the webcam
 	/** Monitor/Ton wurde während des Sendens geändert: Aufnahme neu starten, Zuschauer bleiben verbunden. */
 	private volatile boolean restart;
 	/** Bitrate des Bildes (kbit/s): bis 3 Zuschauer 3000, darüber weniger, damit der Upload reicht. */
@@ -92,6 +94,9 @@ public final class TvSender {
 		this.sound = sound;
 		this.cam = cam;
 		this.camDevice = camDevice;
+		if (cam) {
+			this.window = null;
+		}
 		if (cam) {
 			this.bitrateK = 800;
 		}
@@ -142,6 +147,38 @@ public final class TvSender {
 		}
 	}
 
+	/** Open app windows by title (Windows, via the bundled helper); empty elsewhere or if the helper is missing. */
+	public static List<String> appWindows() {
+		List<String> out = new ArrayList<>();
+		java.nio.file.Path helper = WINDOWS ? Tools.inputHelper() : null;
+		if (helper == null) {
+			return out;
+		}
+		try {
+			Process p = new ProcessBuilder(helper.toString()).redirectErrorStream(true).start();
+			try (OutputStream o = p.getOutputStream()) {
+				o.write("windows\n".getBytes(StandardCharsets.US_ASCII));
+			}
+			String text = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+			p.waitFor(5, TimeUnit.SECONDS);
+			for (String line : text.split("\\R")) {
+				String[] parts = line.trim().split(" ", 2);
+				if (parts.length == 2 && parts[0].equals("window")) {
+					try {
+						String title = new String(java.util.Base64.getDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+						if (!title.isBlank() && !out.contains(title) && !title.equals("Program Manager")) {
+							out.add(title);
+						}
+					} catch (IllegalArgumentException ignored) {
+					}
+				}
+			}
+		} catch (Exception e) {
+			MultiMediaClient.LOGGER.info("App-Fenster auflisten ging nicht: {}", e.toString());
+		}
+		return out;
+	}
+
 	/** Webcams on this PC: Windows by dshow name, Linux as /dev/videoN. */
 	public static List<String> camDevices(Tools.Paths paths) {
 		List<String> out = new ArrayList<>();
@@ -190,6 +227,11 @@ public final class TvSender {
 		return monitor;
 	}
 
+	/** The shared app window (title on Windows, "*" on Linux), or null for the whole monitor. */
+	String window() {
+		return window;
+	}
+
 	public String encoderName() {
 		return encoderName;
 	}
@@ -212,7 +254,7 @@ public final class TvSender {
 	/** Startet das Senden (oder lässt ein laufendes weiterlaufen). Meldungen gehen an status. */
 	public static synchronized void start(int monitor, String sound, Consumer<String> status, Runnable onReady) {
 		if (isSending()) {
-			if (current.monitor == monitor && current.sound.equals(sound)) {
+			if (current.monitor == monitor && current.sound.equals(sound) && java.util.Objects.equals(current.window, Settings.tvWindow())) {
 				onReady.run();
 				return;
 			}
@@ -263,10 +305,12 @@ public final class TvSender {
 		if (s == null || s.stopped) {
 			return false;
 		}
-		if (s.monitor == monitor && s.sound.equals(sound)) {
+		String window = Settings.tvWindow();
+		if (s.monitor == monitor && s.sound.equals(sound) && java.util.Objects.equals(s.window, window)) {
 			status.accept(T.t("Keine Änderung – du sendest schon Monitor ") + (monitor + 1) + ".");
 			return true;
 		}
+		s.window = window;
 		s.monitor = monitor;
 		s.sound = sound;
 		s.changeStatus = status;
@@ -335,7 +379,7 @@ public final class TvSender {
 				restart = false;
 				boolean started = false;
 				List<Variant> list = variants();
-				if (list.isEmpty()) {
+				if (list.isEmpty() && "unbekannt".equals(lastError)) {
 					lastError = cam ? "no webcam found" : "no screen capture tool found";
 				}
 				for (int vi = 0; vi < list.size() && !stopped; vi++) {
@@ -438,6 +482,14 @@ public final class TvSender {
 			return camVariants(x264);
 		}
 		List<Variant> out = new ArrayList<>();
+		String win = window;
+		if (WINDOWS && win != null && !win.equals("*")) {
+			// one app window (GDI): graphics card if possible, else processor
+			List<String> gdi = List.of("-f", "gdigrab", "-framerate", "30", "-draw_mouse", "1", "-i", "title=" + win);
+			out.add(new Variant("App (Grafikkarte)", gdi, concat(List.of("-vf", SCALE + ",format=yuv420p"), nvenc)));
+			out.add(new Variant("App (Prozessor)", gdi, concat(List.of("-vf", SCALE), x264)));
+			return out;
+		}
 		if (WINDOWS) {
 			List<String> dda = List.of("-f", "lavfi", "-i", "ddagrab=output_idx=" + monitor + ":framerate=30:draw_mouse=0");
 			List<String> ddaVf = List.of("-vf", "hwdownload,format=bgra," + SCALE);
@@ -469,6 +521,22 @@ public final class TvSender {
 		boolean wayland = System.getenv("WAYLAND_DISPLAY") != null
 				|| "wayland".equalsIgnoreCase(System.getenv("XDG_SESSION_TYPE"));
 		String display = System.getenv("DISPLAY");
+		if (window != null) {
+			// one app: only the screen-share portal can do that on Wayland (the desktop asks which window)
+			if (wayland && ffmpegHasFilter("pipewiregrab")) {
+				out.add(new Variant("PipeWire (ffmpeg)", List.of("-f", "lavfi", "-i", "pipewiregrab=framerate=30"), scaled,
+						null, null, 60_000));
+			}
+			if (wayland && onPath("gpu-screen-recorder")) {
+				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-c", "mkv",
+						"-o", "/dev/stdout");
+				out.add(new Variant("gpu-screen-recorder", fromPipe, scaled, gsr, null, 60_000));
+			}
+			if (out.isEmpty()) {
+				lastError = "sharing one app on Linux needs gpu-screen-recorder (Wayland)";
+			}
+			return out;
+		}
 		if (wayland) {
 			if (ffmpegHasFilter("pipewiregrab")) {
 				out.add(new Variant("PipeWire (ffmpeg)", List.of("-f", "lavfi", "-i", "pipewiregrab=framerate=30"), scaled,

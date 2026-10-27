@@ -45,6 +45,8 @@ public final class Settings {
 		java.util.Map<String, java.util.List<FloatingScreens.FloatData>> floating = new java.util.HashMap<>();
 		/** Ton beim Senden: all, except:<prog>, only:<prog>, off */
 		String tvSound = "all";
+		/** Share one app window instead of a monitor: "" = whole monitor, "*" = ask (Linux), else window title. */
+		String tvWindow = "";
 		java.util.Set<String> tvInvited = new java.util.TreeSet<>();
 		/** Angenommene Einladungen: Spielername -> Adresse/Port/Schlüssel. */
 		java.util.Map<String, TvSource> tvSources = new java.util.TreeMap<>();
@@ -222,6 +224,16 @@ public final class Settings {
 
 	public static void setTvMonitor(int idx) {
 		data.tvMonitor = idx;
+		save();
+	}
+
+	/** null = whole monitor; "*" = one app, chosen in the desktop's dialog (Linux); else the window title (Windows). */
+	public static String tvWindow() {
+		return data.tvWindow == null || data.tvWindow.isEmpty() ? null : data.tvWindow;
+	}
+
+	public static void setTvWindow(String window) {
+		data.tvWindow = window == null ? "" : window;
 		save();
 	}
 

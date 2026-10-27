@@ -2,6 +2,8 @@
 // Reads one command per line on stdin and replays it with SendInput. Only the mod talks to it, and the mod only
 // forwards events from players the streamer explicitly allowed (/mm control allow <player>).
 //
+//   windows          list open app windows: "window <base64 title>" lines, then "end"
+//   win <base64>     select an app window by title (its client area, like gdigrab), answers "size <w> <h>"
 //   mon <i>          select the monitor (same order as ffmpeg's ddagrab output_idx: DXGI outputs of adapter 0),
 //                    answers "size <w> <h>"
 //   move <x> <y>     pointer to pixel x,y of that monitor
@@ -27,6 +29,62 @@ static RECT g_mon = {0, 0, 0, 0};
 static bool g_held[3] = {false, false, false};
 static POINT g_saved = {0, 0};
 static bool g_hasSaved = false;
+
+static std::string b64encode(const std::string &in) {
+	static const char *chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	std::string out;
+	unsigned int val = 0;
+	int bits = -6;
+	for (unsigned char c : in) {
+		val = ((val << 8) + c) & 0xFFFFF;
+		bits += 8;
+		while (bits >= 0) {
+			out.push_back(chars[(val >> bits) & 0x3F]);
+			bits -= 6;
+		}
+	}
+	if (bits > -6) out.push_back(chars[((val << 8) >> (bits + 8)) & 0x3F]);
+	while (out.size() % 4) out.push_back('=');
+	return out;
+}
+
+static std::string utf8(const std::wstring &w) {
+	int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+	std::string s((size_t)(n > 0 ? n : 0), '\0');
+	if (n > 0) WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
+	return s;
+}
+
+static BOOL CALLBACK listWindow(HWND hwnd, LPARAM) {
+	if (!IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER) != nullptr) return TRUE;
+	if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+	int len = GetWindowTextLengthW(hwnd);
+	if (len <= 0 || len > 300) return TRUE;
+	std::wstring title((size_t)len + 1, L'\0');
+	GetWindowTextW(hwnd, &title[0], len + 1);
+	title.resize((size_t)len);
+	printf("window %s\n", b64encode(utf8(title)).c_str());
+	return TRUE;
+}
+
+/** Client area of the window with this exact title, like ffmpeg's gdigrab "title=" captures it. */
+static bool selectWindow(const std::string &titleUtf8) {
+	int n = MultiByteToWideChar(CP_UTF8, 0, titleUtf8.c_str(), (int)titleUtf8.size(), nullptr, 0);
+	if (n <= 0) return false;
+	std::wstring w((size_t)n, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, titleUtf8.c_str(), (int)titleUtf8.size(), &w[0], n);
+	HWND hwnd = FindWindowW(nullptr, w.c_str());
+	if (!hwnd) return false;
+	RECT r;
+	if (!GetClientRect(hwnd, &r)) return false;
+	POINT tl = {r.left, r.top};
+	ClientToScreen(hwnd, &tl);
+	g_mon.left = tl.x;
+	g_mon.top = tl.y;
+	g_mon.right = tl.x + (r.right - r.left);
+	g_mon.bottom = tl.y + (r.bottom - r.top);
+	return true;
+}
 
 static void dpiAware() {
 	// physical pixels, like DXGI – per-monitor v2 if available (Windows 10 1703+), else system aware
@@ -147,11 +205,12 @@ static void keyCombo(const std::string &combo) {
 static std::string b64decode(const std::string &s) {
 	static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	std::string out;
-	int val = 0, bits = -8;
+	unsigned int val = 0;
+	int bits = -8;
 	for (char c : s) {
 		size_t p = chars.find(c);
 		if (p == std::string::npos) break; // '=' or junk ends it
-		val = (val << 6) + (int)p;
+		val = ((val << 6) + (unsigned int)p) & 0xFFFFFF;
 		bits += 6;
 		if (bits >= 0) {
 			out.push_back((char)((val >> bits) & 0xFF));
@@ -204,6 +263,12 @@ int main() {
 		std::string arg = sp == std::string::npos ? "" : s.substr(sp + 1);
 		if (cmd == "mon") {
 			selectMonitor(atoi(arg.c_str()));
+			printf("size %ld %ld\n", g_mon.right - g_mon.left, g_mon.bottom - g_mon.top);
+		} else if (cmd == "windows") {
+			EnumWindows(listWindow, 0);
+			printf("end\n");
+		} else if (cmd == "win") {
+			if (!selectWindow(b64decode(arg))) selectMonitor(0);
 			printf("size %ld %ld\n", g_mon.right - g_mon.left, g_mon.bottom - g_mon.top);
 		} else if (cmd == "move") {
 			int x = 0, y = 0;

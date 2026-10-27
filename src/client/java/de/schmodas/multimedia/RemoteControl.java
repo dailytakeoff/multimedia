@@ -434,6 +434,7 @@ public final class RemoteControl {
 		private volatile int width;
 		private volatile int height;
 		private volatile int monitor = -1;
+		private volatile long windowAskedAt;
 
 		WindowsInjector(java.nio.file.Path helper) {
 			Process p = null;
@@ -481,8 +482,23 @@ public final class RemoteControl {
 			}
 		}
 
+		private volatile String windowTarget;
+
 		@Override
 		int[] monitorSize(TvSender s) {
+			String w = s.window();
+			if (w != null && !w.equals("*")) {
+				// sharing one app: follow its window (asked again every few seconds, it may have moved)
+				long now = System.currentTimeMillis();
+				if (!w.equals(windowTarget) || now - windowAskedAt > 3000) {
+					windowTarget = w;
+					windowAskedAt = now;
+					monitor = -1;
+					send("win " + Base64.getEncoder().encodeToString(w.getBytes(StandardCharsets.UTF_8)));
+				}
+				return width > 0 ? new int[]{width, height} : null;
+			}
+			windowTarget = null;
 			int m = s.monitor();
 			if (m != monitor) {
 				// ask the helper for this monitor; until its size arrives (a few ms) events are skipped
