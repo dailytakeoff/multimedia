@@ -341,7 +341,7 @@ final class LiveFeed {
 			if (stun.mapped() != null) {
 				mine.add(stun.mapped());
 			}
-			InetSocketAddress forwarded = ep.upnp(3000);
+			InetSocketAddress forwarded = ep.upnp(400); // only if the router answers quickly – never hold up connecting
 			if (forwarded != null && !mine.contains(forwarded)) {
 				mine.add(forwarded);
 			}

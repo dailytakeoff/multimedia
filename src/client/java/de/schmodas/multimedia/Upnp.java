@@ -50,6 +50,17 @@ final class Upnp {
 	private Upnp() {
 	}
 
+	/** Look for the router in the background at start-up, so connecting later doesn't wait for it. */
+	static void warmUp() {
+		Thread t = new Thread(() -> {
+			synchronized (Upnp.class) {
+				gateway();
+			}
+		}, "MultiMedia-UpnpSearch");
+		t.setDaemon(true);
+		t.start();
+	}
+
 	/** Forwards UDP localPort on the router; returns the public address friends can reach, or null. */
 	static synchronized InetSocketAddress map(int localPort) {
 		Gateway g = gateway();

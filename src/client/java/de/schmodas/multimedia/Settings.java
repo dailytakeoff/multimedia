@@ -42,6 +42,8 @@ public final class Settings {
 		/** Menu colours: accent colour and panel style (see MenuScreen.ACCENTS / PANELS). */
 		int uiAccent = 0;
 		int uiPanel = 0;
+		/** Floating screens with a player's screen: play its sound (picture waits ~1.5 s to match) or no sound, no delay. */
+		boolean liveSound = true;
 		/** Volume of everything the mod plays, 0–100. */
 		int masterVolume = 100;
 		/** Your own volume per floating screen ("owner/id" -> 0–100). */
@@ -292,6 +294,15 @@ public final class Settings {
 
 	public static void setUiPanel(int i) {
 		data.uiPanel = i;
+		save();
+	}
+
+	public static boolean liveSound() {
+		return data.liveSound;
+	}
+
+	public static void setLiveSound(boolean on) {
+		data.liveSound = on;
 		save();
 	}
 

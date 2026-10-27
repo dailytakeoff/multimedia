@@ -696,6 +696,15 @@ public class MenuScreen extends Screen {
 		label(g, x, y, "Volume");
 		slider(g, fieldX, y, fieldW - 30, Settings.masterVolume(), Settings::setMasterVolume);
 		y += 24;
+		label(g, x, y, "Screen share sound");
+		boolean ls = Settings.liveSound();
+		toggle(g, x + w - 26, y, ls, () -> {
+			Settings.setLiveSound(!Settings.liveSound());
+			FloatingScreens.closeAll(); // reconnect with / without sound
+		});
+		y += 20;
+		g.text(this.font, ls ? "On: sound in sync, picture ~1.5 s behind." : "Off: no sound, picture almost live.", x, y + 2, DIM, false);
+		y += 18;
 		y = section(g, x, y, w, "Picture");
 		label(g, x, y, "Quality");
 		List<String> q = List.of("Normal (480p)", "High (720p)", "Very high (1080p)");

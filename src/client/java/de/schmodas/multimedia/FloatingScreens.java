@@ -619,8 +619,8 @@ public final class FloatingScreens {
 			if (target == null) {
 				return null; // no invite from that player
 			}
-			if (!cam) {
-				startSound(mc, level, d, Source.live(name));
+			if (!cam && Settings.liveSound()) {
+				startSound(mc, level, d, Source.live(name)); // in sync: the picture waits for the sound (~1.5 s)
 			}
 			return new LivePlayer(name, target, cam);
 		}

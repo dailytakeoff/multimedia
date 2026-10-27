@@ -32,6 +32,7 @@ public class MultiMediaClient implements ClientModInitializer {
 		TvInvite.register();
 		TvSignal.register();
 		FloatingScreens.register();
+		Upnp.warmUp();
 		// menu hotkey (M by default, changeable under Controls)
 		MENU_KEY = net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper.registerKeyMapping(new net.minecraft.client.KeyMapping(
 				"key.multimedia.menu", com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD,
