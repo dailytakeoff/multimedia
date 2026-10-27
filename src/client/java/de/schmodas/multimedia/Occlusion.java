@@ -118,6 +118,10 @@ public final class Occlusion {
 			}
 			// ... aber jeden Tick ein kleines Stück dorthin gleiten: Sprünge in der Lautstärke knacken hörbar.
 			float master = Settings.masterVolume() / 100F; // Lautstärke-Regler im Menü
+			Source playing = inst.playback() == null ? null : inst.playback().source;
+			if (playing != null && playing.isLive()) {
+				master *= Settings.screenVolume("tv:" + playing.liveName()) / 100F; // Lautstärke für diesen Spieler-TV
+			}
 			float wantGain = Math.max(0.001F, inst.targetGain * inst.userVolume * master); // inkl. Schild-Lautstärke
 			float wantHf = Math.max(0.001F, inst.targetGainHf);
 			float wantBass = Math.max(0.001F, inst.targetBass * inst.userVolume * master);

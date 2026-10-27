@@ -77,7 +77,7 @@ public class TouchScreen extends Screen {
 	/** Picture area: as big as fits above the buttons, 16:9. */
 	private int[] area() {
 		int maxW = this.width - 20;
-		int maxH = this.height - (volumeKey != null ? 88 : 64);
+		int maxH = this.height - (volumeKey != null || (feed != null && !feed.cam) ? 88 : 64);
 		int w = maxW;
 		int h = w * 9 / 16;
 		if (h > maxH) {
@@ -104,7 +104,12 @@ public class TouchScreen extends Screen {
 	protected void init() {
 		int y = this.height - 30;
 		int cx = this.width / 2;
-		if (volumeKey != null) {
+		if (feed != null && !feed.cam) {
+			// a player's TV: one volume for it everywhere (wall screens, floating screens, jukebox speakers)
+			String key = "tv:" + feed.sender.toLowerCase(java.util.Locale.ROOT);
+			this.addRenderableWidget(new VolumeSlider(cx - 154, y - 24, 308, feed.sender + "'s TV volume (just for you)",
+					Settings.screenVolume(key), v -> Settings.setScreenVolume(key, v)));
+		} else if (volumeKey != null) {
 			String key = volumeKey;
 			this.addRenderableWidget(new VolumeSlider(cx - 154, y - 24, 308, "Volume (just for you)",
 					Settings.screenVolume(key), v -> FloatingScreens.setVolume(key, v)));
