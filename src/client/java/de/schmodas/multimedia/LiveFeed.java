@@ -341,6 +341,10 @@ final class LiveFeed {
 			if (stun.mapped() != null) {
 				mine.add(stun.mapped());
 			}
+			InetSocketAddress forwarded = ep.upnp(3000);
+			if (forwarded != null && !mine.contains(forwarded)) {
+				mine.add(forwarded);
+			}
 			mine.addAll(P2p.localCandidates(ep.port()));
 			long session = P2p.newSession();
 			MultiMediaClient.LOGGER.info("Live ({}): frage an (eigene Adresse {}{})", sender,
@@ -412,7 +416,8 @@ final class LiveFeed {
 				Thread.sleep(100);
 			}
 			if (peer.get() == null) {
-				status = T.t("Direkte Verbindung zu ") + displayName + T.t(" klappt nicht (Netzwerk blockiert)");
+				status = "Can't connect to " + displayName + " – one of your networks blocks it (phone hotspot?). "
+						+ "Works if either of you is on home internet with UPnP on the router.";
 				MultiMediaClient.LOGGER.info("Live ({}): Loch bohren fehlgeschlagen (eigene Adresse {}, seine {})", sender,
 						stun.mapped() == null ? "?" : P2p.format(stun.mapped()), answer.candidates().size());
 				pause(30_000);

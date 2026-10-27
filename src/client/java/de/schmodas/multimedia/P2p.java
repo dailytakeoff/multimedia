@@ -138,6 +138,10 @@ final class P2p {
 		};
 		private volatile boolean closed;
 
+		/** Address on the router's internet side forwarded to this socket by UPnP, or null. */
+		private volatile InetSocketAddress upnp;
+		private volatile boolean upnpDone;
+
 		Endpoint() throws SocketException {
 			socket = new DatagramSocket(0);
 			socket.setReceiveBufferSize(4 << 20);
@@ -145,6 +149,37 @@ final class P2p {
 			Thread t = new Thread(this::receiveLoop, "MultiMedia-Udp");
 			t.setDaemon(true);
 			t.start();
+			// ask the home router to forward this port (helps friends on hotspots / mobile networks); renew while open
+			Thread u = new Thread(() -> {
+				try {
+					while (!closed) {
+						InetSocketAddress a = Upnp.map(port());
+						if (a != null) {
+							upnp = a;
+						}
+						upnpDone = true;
+						if (a == null) {
+							return;
+						}
+						for (int i = 0; i < 25 * 60 && !closed; i++) {
+							P2p.sleep(1000);
+						}
+					}
+				} finally {
+					upnpDone = true;
+				}
+			}, "MultiMedia-Upnp");
+			u.setDaemon(true);
+			u.start();
+		}
+
+		/** The forwarded address (waits up to waitMs for the router to answer), or null. */
+		InetSocketAddress upnp(long waitMs) {
+			long end = System.currentTimeMillis() + waitMs;
+			while (!upnpDone && System.currentTimeMillis() < end) {
+				P2p.sleep(50);
+			}
+			return upnp;
 		}
 
 		void onPacket(BiConsumer<byte[], InetSocketAddress> r) {
@@ -296,6 +331,12 @@ final class P2p {
 		public void close() {
 			closed = true;
 			socket.close();
+			InetSocketAddress a = upnp;
+			if (a != null) {
+				Thread t = new Thread(() -> Upnp.unmap(a.getPort()), "MultiMedia-UpnpOff");
+				t.setDaemon(true);
+				t.start();
+			}
 		}
 	}
 

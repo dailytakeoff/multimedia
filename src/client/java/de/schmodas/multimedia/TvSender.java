@@ -1098,6 +1098,10 @@ public final class TvSender {
 		if (r != null && r.mapped() != null) {
 			mine.add(r.mapped());
 		}
+		InetSocketAddress forwarded = udp.upnp(0);
+		if (forwarded != null && !mine.contains(forwarded)) {
+			mine.add(forwarded); // reachable even from hotspots (router forwards it)
+		}
 		mine.addAll(P2p.localCandidates(udp.port()));
 		TvSignal.answer(viewer, session, "ok", mine, cam);
 		MultiMediaClient.LOGGER.info("Senden: {} möchte zuschauen – bohre Loch (meine Adressen {}, seine {})", viewer, mine.size(), candidates.size());
