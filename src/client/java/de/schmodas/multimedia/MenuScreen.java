@@ -500,6 +500,7 @@ public class MenuScreen extends Screen {
 
 	private void startSharing() {
 		saveShareChoices();
+		ensureShareScreen();
 		int monitor = Settings.tvMonitor();
 		String snd = Settings.tvSound();
 		MultiMediaClient.status("Starting screen share …");
@@ -513,7 +514,7 @@ public class MenuScreen extends Screen {
 				List<String> online = onlinePlayers();
 				List<String> to = new ArrayList<>();
 				for (String p : Settings.tvInvited()) {
-					if (online.stream().anyMatch(p::equalsIgnoreCase)) {
+					if (online.stream().anyMatch(p::equalsIgnoreCase) && TvInvite.firstThisSession(p)) {
 						to.add(p);
 					}
 				}
@@ -522,6 +523,35 @@ public class MenuScreen extends Screen {
 				}
 			});
 		});
+	}
+
+	/**
+	 * Your stream has to be on a screen for friends to see it: if none of your floating screens shows it,
+	 * put one in front of you for the friends you turned on (or everyone with the mod if you haven't picked any).
+	 */
+	private static void ensureShareScreen() {
+		String me = Minecraft.getInstance().getUser().getName();
+		for (FloatingScreens.FloatData d : FloatingScreens.own()) {
+			if (d.content.equalsIgnoreCase("tv:" + me)) {
+				return;
+			}
+		}
+		FloatingScreens.FloatData d = FloatingScreens.create();
+		if (d == null) {
+			MultiMediaClient.error("You have the most floating screens already – show your share on one of them (Screens page).");
+			return;
+		}
+		d.content = "tv:" + me;
+		d.width = 4;
+		List<String> friends = new ArrayList<>(Settings.tvInvited());
+		if (friends.isEmpty()) {
+			d.visibility = "all";
+		} else {
+			d.visibility = "friends";
+			d.friends = friends;
+		}
+		FloatingScreens.saved(d);
+		MultiMediaClient.status("Your screen share is on a floating screen in front of you – move it on the Screens page.");
 	}
 
 	private void applySharing() {

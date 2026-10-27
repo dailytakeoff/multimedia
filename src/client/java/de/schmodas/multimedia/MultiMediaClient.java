@@ -326,7 +326,7 @@ public class MultiMediaClient implements ClientModInitializer {
 				conn.getOnlinePlayers().forEach(p -> online.add(p.getProfile().name()));
 				java.util.List<String> invite = new java.util.ArrayList<>();
 				for (String name : Settings.tvInvited()) {
-					if (online.contains(name)) {
+					if (online.contains(name) && TvInvite.firstThisSession(name)) {
 						invite.add(name);
 					}
 				}

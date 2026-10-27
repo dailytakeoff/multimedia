@@ -71,18 +71,38 @@ public final class TvInvite {
 		MultiMediaClient.status(T.t("Einladung geschickt an: ") + String.join(", ", players));
 	}
 
+	/** Invites sent this session (lower case) – each player gets at most one. */
+	private static final java.util.Set<String> SENT = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/** True the first time this session we'd invite this player. */
+	public static boolean firstThisSession(String player) {
+		return SENT.add(player.toLowerCase(java.util.Locale.ROOT));
+	}
+
 	public static void register() {
-		ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, time) -> {
+		// hide the raw invite whisper; onMessage shows a tidy line with [Accept] (only if it's new)
+		ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signed, sender, params, time) -> {
+			String text = message.getString();
+			if (!CODE.matcher(text).find()) {
+				return true;
+			}
 			Minecraft mc = Minecraft.getInstance();
 			boolean own = sender != null && mc.player != null && sender.id().equals(mc.player.getUUID());
 			if (!own) {
-				onMessage(message.getString());
+				onMessage(text);
 			}
+			return false;
 		});
-		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-			if (!overlay) {
-				onMessage(message.getString());
+		ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
+			String text = message.getString();
+			if (overlay || !CODE.matcher(text).find()) {
+				return true;
 			}
+			String low = text.toLowerCase(java.util.Locale.ROOT);
+			if (!text.contains("→") && !low.startsWith("you whisper") && !low.startsWith("du flüsterst")) {
+				onMessage(text);
+			}
+			return false;
 		});
 	}
 
