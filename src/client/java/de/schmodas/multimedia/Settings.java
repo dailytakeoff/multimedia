@@ -39,6 +39,8 @@ public final class Settings {
 		int tvMonitor = 0;
 		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
 		String camDevice;
+		/** Players known to have the mod (lower case), see ModPeers. */
+		java.util.Set<String> knownModPlayers = new java.util.TreeSet<>();
 		/** Own floating screens per server address. */
 		java.util.Map<String, java.util.List<FloatingScreens.FloatData>> floating = new java.util.HashMap<>();
 		/** Ton beim Senden: all, except:<prog>, only:<prog>, off */
@@ -190,6 +192,19 @@ public final class Settings {
 			data.floating.put(server, screens);
 		}
 		save();
+	}
+
+	public static synchronized java.util.Set<String> knownModPlayers() {
+		return data.knownModPlayers == null ? java.util.Set.of() : java.util.Set.copyOf(data.knownModPlayers);
+	}
+
+	public static synchronized void addKnownModPlayer(String name) {
+		if (data.knownModPlayers == null) {
+			data.knownModPlayers = new java.util.TreeSet<>();
+		}
+		if (data.knownModPlayers.size() < 2000 && data.knownModPlayers.add(name)) {
+			save();
+		}
 	}
 
 	public static String camDevice() {

@@ -214,7 +214,7 @@ public final class FloatingScreens {
 			return; // nobody else knew about it
 		}
 		for (String p : onlineNames()) {
-			if (!p.equalsIgnoreCase(me())) {
+			if (!p.equalsIgnoreCase(me()) && (ModPeers.has(p) || containsIgnoreCase(d.friends, p))) {
 				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id));
 			}
 		}
@@ -296,7 +296,7 @@ public final class FloatingScreens {
 			if (p.equalsIgnoreCase(mine)) {
 				continue;
 			}
-			if (d.visibility.equals("all") || (d.visibility.equals("friends") && containsIgnoreCase(d.friends, p))) {
+			if (sees(d, p)) {
 				out.add(p);
 			}
 		}
@@ -310,9 +310,11 @@ public final class FloatingScreens {
 			if (p.equalsIgnoreCase(mine)) {
 				continue;
 			}
-			boolean sees = d.visibility.equals("all") || (d.visibility.equals("friends") && containsIgnoreCase(d.friends, p));
-			// people who no longer see it get a delete, so it disappears for them
-			whisper(p, sees ? code : "mmfd1:" + b64(d.owner + "|" + d.id));
+			if (sees(d, p)) {
+				whisper(p, code);
+			} else if (ModPeers.has(p)) {
+				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id)); // no longer sees it: remove it for them
+			}
 		}
 	}
 
@@ -359,6 +361,7 @@ public final class FloatingScreens {
 					return;
 				}
 				OTHERS.put(key, d);
+				ModPeers.mark(d.owner);
 				if (old == null || !old.content.equals(d.content)) {
 					closePlayer(key);
 				}
@@ -376,6 +379,7 @@ public final class FloatingScreens {
 				return;
 			}
 			String key = p[0].toLowerCase(Locale.ROOT) + "/" + p[1];
+			ModPeers.mark(p[0]);
 			if (OTHERS.remove(key) != null) {
 				closePlayer(key);
 			}
@@ -409,6 +413,15 @@ public final class FloatingScreens {
 			conn.getOnlinePlayers().forEach(i -> out.add(i.getProfile().name()));
 		}
 		return out;
+	}
+
+	/**
+	 * Does this player get the screen? "Everyone" means players known to have the mod (so players without it
+	 * never get code messages); picked friends always, because you chose them.
+	 */
+	private static boolean sees(FloatData d, String player) {
+		return (d.visibility.equals("all") && ModPeers.has(player))
+				|| (d.visibility.equals("friends") && containsIgnoreCase(d.friends, player));
 	}
 
 	private static boolean containsIgnoreCase(List<String> list, String s) {
@@ -534,7 +547,7 @@ public final class FloatingScreens {
 			}
 			SENT_TO.add(low);
 			for (FloatData d : OWN) {
-				if (d.visibility.equals("all") || (d.visibility.equals("friends") && containsIgnoreCase(d.friends, p))) {
+				if (sees(d, p)) {
 					whisper(p, encode(d));
 				}
 			}

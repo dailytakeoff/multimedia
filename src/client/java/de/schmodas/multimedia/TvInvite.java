@@ -96,6 +96,7 @@ public final class TvInvite {
 		if (inv == null || inv.name().equalsIgnoreCase(mc.getUser().getName())) {
 			return; // kaputt oder die eigene
 		}
+		ModPeers.mark(inv.name());
 		Settings.TvSource known = Settings.tvSource(inv.name());
 		boolean same = known != null && known.token().equals(inv.token());
 		if (same) {

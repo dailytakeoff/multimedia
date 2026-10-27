@@ -114,7 +114,8 @@ public class FloatEditScreen extends Screen {
 			};
 			rebuildWidgets();
 		}).bounds(left, y, 310, 20).tooltip(Tooltip.create(Component.literal(
-				"Only you · friends you tick below · everyone with the mod on this server"))).build());
+				"Only you · friends you tick below (a friend without the mod would see one code message) · "
+				+ "everyone known to have the mod (they've accepted an invite, watched or shared a screen with you)"))).build());
 		y += 24;
 		if (screen.visibility.equals("friends")) {
 			int col = 0;

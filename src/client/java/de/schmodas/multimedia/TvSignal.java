@@ -111,6 +111,7 @@ final class TvSignal {
 			}
 			List<InetSocketAddress> cands = candidates(p.length > 3 ? p[3] : "");
 			String viewer = p[0];
+			ModPeers.mark(viewer);
 			Thread t = new Thread(() -> TvSender.handleRequest(viewer, p[1], session, cands, cam), "MultiMedia-TvRequest");
 			t.setDaemon(true);
 			t.start();
@@ -133,6 +134,7 @@ final class TvSignal {
 				return;
 			}
 			Answer ans = new Answer(p[0], p[2], candidates(p.length > 3 ? p[3] : ""));
+			ModPeers.mark(p[0]);
 			if (session == 0 && ans.status().equals("on")) {
 				LiveFeed.wake(p[0], cam);
 				return;
