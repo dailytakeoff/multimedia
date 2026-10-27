@@ -335,6 +335,9 @@ public final class TvSender {
 				restart = false;
 				boolean started = false;
 				List<Variant> list = variants();
+				if (list.isEmpty()) {
+					lastError = cam ? "no webcam found" : "no screen capture tool found";
+				}
 				for (int vi = 0; vi < list.size() && !stopped; vi++) {
 					Variant v = list.get(vi);
 					if (!startEncoder(paths, v)) {
