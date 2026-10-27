@@ -19,6 +19,7 @@ public final class ModPeers {
 	}
 
 	public static boolean has(String name) {
-		return name != null && Settings.knownModPlayers().contains(name.toLowerCase(Locale.ROOT));
+		// someone whose invite we accepted has the mod too
+		return name != null && (Settings.knownModPlayers().contains(name.toLowerCase(Locale.ROOT)) || Settings.tvSource(name) != null);
 	}
 }

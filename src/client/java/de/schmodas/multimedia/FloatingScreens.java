@@ -116,7 +116,11 @@ public final class FloatingScreens {
 
 	private static final Pattern SCREEN = Pattern.compile("mmfs1:([A-Za-z0-9_-]{10,})");
 	private static final Pattern DELETE = Pattern.compile("mmfd1:([A-Za-z0-9_-]{4,})");
-	private static final Pattern ANY = Pattern.compile("mmf[sd]1:");
+	/** "Hello, I have the mod" – sent back once to someone whose screen we got, so they know us too. */
+	private static final Pattern HELLO = Pattern.compile("mmfh1:([A-Za-z0-9_-]{4,})");
+	private static final Pattern ANY = Pattern.compile("mmf[sdh]1:");
+	/** Players we've said hello to this session (lower case). */
+	private static final Set<String> GREETED = new HashSet<>();
 	private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
 
 	private FloatingScreens() {
@@ -155,6 +159,7 @@ public final class FloatingScreens {
 		FloatData d = new FloatData();
 		d.id = Long.toString(System.nanoTime() & 0xFFFFFFFFFFL, 36);
 		d.owner = me();
+		d.visibility = "all"; // new screens are shared with players who have the mod (change in the editor)
 		placeInFront(d);
 		OWN.add(d);
 		return d;
@@ -321,9 +326,23 @@ public final class FloatingScreens {
 	private static String encode(FloatData d) {
 		String raw = String.join("|", d.owner, d.id, d.dim == null ? "?" : d.dim,
 				String.format(Locale.ROOT, "%.2f", d.x), String.format(Locale.ROOT, "%.2f", d.y), String.format(Locale.ROOT, "%.2f", d.z),
-				String.format(Locale.ROOT, "%.1f", d.yaw), String.format(Locale.ROOT, "%.1f", d.tilt),
-				String.format(Locale.ROOT, "%.1f", d.width), d.content);
+				String.format(Locale.ROOT, "%.0f", ((d.yaw % 360) + 360) % 360), String.format(Locale.ROOT, "%.0f", d.tilt),
+				String.format(Locale.ROOT, "%.1f", d.width), shortContent(d.content));
 		return "mmfs1:" + b64(raw);
+	}
+
+	/** YouTube content in its short form ("yt:ID" / "list=ID" + flags), so the whisper stays under the chat limit. */
+	private static String shortContent(String content) {
+		Source s = Source.parse(content);
+		if (s == null || s.isLive() || content.startsWith("tv:") || content.startsWith("cam:")) {
+			return content;
+		}
+		String url = s.url();
+		String base = s.playlist() ? "list=" + url.substring(url.indexOf("list=") + 5)
+				: "yt:" + url.substring(url.indexOf("watch?v=") + 8);
+		return base + (s.shuffle() ? " mix" : "") + (s.loop() ? " loop" : "") + (s.first() > 0 ? " ▶" + (s.first() + 1) : "")
+				+ (s.start() >= 0 ? " @" + s.start() : "")
+				+ (s.isPaused() ? " ⏸" + String.format(Locale.ROOT, "%.1f", s.paused()) : "");
 	}
 
 	private static void handle(String text, String chatSender) {
@@ -362,11 +381,24 @@ public final class FloatingScreens {
 				}
 				OTHERS.put(key, d);
 				ModPeers.mark(d.owner);
+				greet(d.owner);
 				if (old == null || !old.content.equals(d.content)) {
 					closePlayer(key);
 				}
 			} catch (NumberFormatException ignored) {
 			}
+			return;
+		}
+		Matcher hello = HELLO.matcher(text);
+		if (hello.find()) {
+			String[] p = unb64(hello.group(1));
+			if (p == null || p.length < 1 || !NAME.matcher(p[0]).matches()
+					|| (chatSender != null && !chatSender.equalsIgnoreCase(p[0]))) {
+				return;
+			}
+			ModPeers.mark(p[0]);
+			SENT_TO.remove(p[0].toLowerCase(Locale.ROOT)); // send them our "everyone" screens on the next tick
+			SEEN_ONLINE_AT.remove(p[0].toLowerCase(Locale.ROOT));
 			return;
 		}
 		Matcher del = DELETE.matcher(text);
@@ -386,6 +418,13 @@ public final class FloatingScreens {
 		}
 	}
 
+	/** Once per session: tell a player whose screen we got that we have the mod (so we get their "everyone" screens too). */
+	private static void greet(String owner) {
+		if (GREETED.add(owner.toLowerCase(Locale.ROOT))) {
+			whisper(owner, "mmfh1:" + b64(me()));
+		}
+	}
+
 	/** Only YouTube (through Source's checks) or a player name – never arbitrary links. */
 	static boolean safeContent(String content) {
 		if (content == null || content.isBlank()) {
@@ -401,8 +440,14 @@ public final class FloatingScreens {
 	private static void whisper(String to, String code) {
 		Minecraft mc = Minecraft.getInstance();
 		var conn = mc.getConnection();
+		String command = "msg " + to + " [MultiMedia] " + code;
+		if (command.length() > 255) {
+			MultiMediaClient.LOGGER.warn("Schwebende Leinwand: Nachricht zu lang ({} Zeichen) – nicht gesendet", command.length());
+			MultiMediaClient.error("This floating screen's link is too long to send to others.");
+			return;
+		}
 		if (conn != null) {
-			conn.sendCommand("msg " + to + " [MultiMedia] " + code);
+			conn.sendCommand(command);
 		}
 	}
 
@@ -459,6 +504,7 @@ public final class FloatingScreens {
 			if (level == null) {
 				OTHERS.clear();
 				SENT_TO.clear();
+				GREETED.clear();
 				SEEN_ONLINE_AT.clear();
 				loadedFor = null;
 			}
@@ -641,9 +687,7 @@ public final class FloatingScreens {
 				frame = src.hasFrame();
 			}
 			boolean mine = d.owner.equalsIgnoreCase(mc.getUser().getName());
-			if (!frame && !mine) {
-				continue; // others' screens only show up while something is playing
-			}
+
 			float w = d.width / 2;
 			float h = d.height() / 2;
 			poseStack.pushPose();
@@ -666,8 +710,9 @@ public final class FloatingScreens {
 			if (showFrame) {
 				ctx.submitNodeCollector().submitCustomGeometry(poseStack, RenderTypes.text(src.textureId()),
 						(pose, buffer) -> quad(pose.pose(), buffer, w, h, 0F, tint, false));
-			} else if (mine) {
-				String note = d.content.isBlank() ? "Empty – press M to pick a video"
+			} else {
+				String note = !mine && src == null && !d.content.startsWith("tv:") && !d.content.startsWith("cam:") ? d.owner + "'s screen – loading …"
+						: d.content.isBlank() ? (mine ? "Empty – press M to pick a video" : d.owner + "'s screen (empty)")
 						: src == null ? (d.content.startsWith("tv:") || d.content.startsWith("cam:") ? "Needs an invite from " + d.content.substring(d.content.indexOf(':') + 1) : "Loading …")
 						: src.status() != null ? src.status() : "Loading …";
 				drawNote(ctx, poseStack, d, note);
