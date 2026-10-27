@@ -16,7 +16,16 @@ jobs:
       - name: Build audio helper from native/mmaudio.cpp
         run: ./scripts/build-audio-helper.sh
       - name: Build mod
-        run: ./gradlew build --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew build --no-daemon 2>&1 | tee build.log
+      - name: Report compile errors as annotations
+        if: failure()
+        run: |
+          # each error with the 3 lines after it (symbol/location), all in one annotation (newlines as %0A)
+          grep -E -A3 '(error:|e: |FAILURE|What went wrong)' build.log | head -400 > errors.txt || true
+          msg=$(sed -e 's/%/%25/g' errors.txt | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Build errors::${msg:0:60000}"
       - name: Checksums
         run: sha256sum build/libs/*.jar src/client/resources/multimedia/mmaudio.exe
       - uses: actions/upload-artifact@v4
