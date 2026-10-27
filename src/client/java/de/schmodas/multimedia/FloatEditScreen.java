@@ -142,7 +142,7 @@ public class FloatEditScreen extends Screen {
 		// ---- Save / cancel
 		int bottom = Math.max(y + 8, this.height - 28);
 		this.addRenderableWidget(Button.builder(Component.literal("✔ Save"), b -> save()).bounds(left, bottom, 100, 20).build());
-		this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(cx - 50, bottom, 100, 20).build());
+		this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> cancel()).bounds(cx - 50, bottom, 100, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal("✖ Delete"), b -> {
 			FloatingScreens.remove(screen);
 			Minecraft.getInstance().gui.setScreen(parent);
@@ -218,11 +218,24 @@ public class FloatEditScreen extends Screen {
 		}
 		screen.content = spec;
 		FloatingScreens.saved(screen);
+		MultiMediaClient.status("Floating screen saved" + (spec.isEmpty() ? " (empty)" : ": " + screen.describe()) + ".");
 		Minecraft.getInstance().gui.setScreen(parent);
 	}
 
+	/** Esc: keep the screen (a new one stays where it is, so it doesn't vanish by accident). */
 	@Override
 	public void onClose() {
+		if (isNew) {
+			FloatingScreens.saved(screen);
+			MultiMediaClient.status("Floating screen placed. Press M to pick a video for it or move it.");
+			Minecraft.getInstance().gui.setScreen(parent);
+			return;
+		}
+		cancel();
+	}
+
+	/** Cancel: a new screen is removed again, an existing one goes back to how it was. */
+	private void cancel() {
 		if (isNew) {
 			FloatingScreens.remove(screen);
 		} else {

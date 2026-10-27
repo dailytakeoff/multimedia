@@ -640,16 +640,41 @@ public final class FloatingScreens {
 			int brightness = Math.round(255 * Settings.screenBrightness() / 100F);
 			int tint = 0xFF000000 | (brightness << 16) | (brightness << 8) | brightness;
 			boolean showFrame = frame;
-			ctx.submitNodeCollector().submitCustomGeometry(poseStack,
-					RenderTypes.text(src != null ? src.textureId() : blackTexture()),
-					(pose, buffer) -> {
-						Matrix4f m = pose.pose();
-						// back: black, slightly behind (hides the mirrored picture from behind)
-						quad(m, buffer, w, h, -0.01F, 0xFF000000, true);
-						quad(m, buffer, w, h, 0F, showFrame ? tint : 0xFF101418, false);
-					});
+			float border = Math.max(0.04F, d.width * 0.015F);
+			// plain colours (white 1x1 texture): black back, grey frame, dark-blue placeholder while nothing plays
+			ctx.submitNodeCollector().submitCustomGeometry(poseStack, RenderTypes.text(blackTexture()), (pose, buffer) -> {
+				Matrix4f m = pose.pose();
+				quad(m, buffer, w + border, h + border, -0.012F, 0xFF000000, true);
+				quad(m, buffer, w + border, h + border, -0.006F, 0xFF6B7684, false);
+				if (!showFrame) {
+					quad(m, buffer, w, h, 0F, 0xFF1F2A3A, false);
+				}
+			});
+			if (showFrame) {
+				ctx.submitNodeCollector().submitCustomGeometry(poseStack, RenderTypes.text(src.textureId()),
+						(pose, buffer) -> quad(pose.pose(), buffer, w, h, 0F, tint, false));
+			} else if (mine) {
+				String note = d.content.isBlank() ? "Empty – press M to pick a video"
+						: src == null ? (d.content.startsWith("tv:") || d.content.startsWith("cam:") ? "Needs an invite from " + d.content.substring(d.content.indexOf(':') + 1) : "Loading …")
+						: src.status() != null ? src.status() : "Loading …";
+				drawNote(ctx, poseStack, d, note);
+			}
 			poseStack.popPose();
 		}
+	}
+
+	/** Text in the middle of the screen (it already faces +Z here). */
+	private static void drawNote(LevelRenderContext ctx, PoseStack poseStack, FloatData d, String note) {
+		var font = Minecraft.getInstance().font;
+		var text = net.minecraft.network.chat.Component.literal(note).getVisualOrderText();
+		int textWidth = Math.max(1, font.width(text));
+		float scale = Math.min(0.8F * d.width / textWidth, 0.12F * d.height() / font.lineHeight);
+		poseStack.pushPose();
+		poseStack.translate(0, 0, 0.01);
+		poseStack.scale(scale, -scale, scale);
+		ctx.submitNodeCollector().submitText(poseStack, -textWidth / 2F, -font.lineHeight / 2F, text, false,
+				net.minecraft.client.gui.Font.DisplayMode.NORMAL, LightCoordsUtil.FULL_BRIGHT, 0xFFDDE4EE, 0, 0);
+		poseStack.popPose();
 	}
 
 	private static void quad(Matrix4f m, VertexConsumer b, float w, float h, float z, int color, boolean back) {
