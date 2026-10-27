@@ -106,7 +106,7 @@ public final class TvSender {
 		if (cam) {
 			this.window = null;
 		}
-		this.bitrateK = cam ? 800 : baseBitrateK;
+		this.bitrateK = cam ? 800 : Math.min(baseBitrateK, 3000); // start safe, go up while nothing is lost
 	}
 
 	public static boolean isSending() {
@@ -351,10 +351,44 @@ public final class TvSender {
 		}
 		long wantSince = 0;
 		int lastWant = bitrateK;
+		long cleanSince = System.currentTimeMillis();
+		long lastLossDrop = 0;
 		while (!stopped) {
 			P2p.sleep(2000);
 			int viewers = viewerCount();
+			// --- loss: if a friend asks for many packets again, the upload is full -> less bitrate right away
+			double worst = 0;
+			String worstName = null;
+			for (UdpViewer v : udpViewers.values()) {
+				int sent = v.sentCount.getAndSet(0);
+				int lost = v.lostCount.getAndSet(0);
+				if (sent > 50) {
+					double loss = lost / (double) sent;
+					if (loss > worst) {
+						worst = loss;
+						worstName = v.name;
+					}
+				}
+			}
+			long now = System.currentTimeMillis();
+			if (worst > 0.03 && now - lastLossDrop > 6000 && bitrateK > 700) {
+				lossCapK = Math.max(600, (int) (Math.min(lossCapK, bitrateK) * (worst > 0.15 ? 0.5 : 0.7)) / 100 * 100);
+				lastLossDrop = now;
+				cleanSince = now;
+				MultiMediaClient.LOGGER.info("Senden: {} % Verlust bei {} – Bitrate runter auf {} kbit/s",
+						Math.round(worst * 100), worstName, lossCapK);
+			} else if (worst > 0.005) {
+				cleanSince = now;
+			} else if (now - cleanSince > 30_000 && lossCapK < baseBitrateK) {
+				lossCapK = Math.min(baseBitrateK, (int) (lossCapK * 1.25) / 100 * 100); // carefully back up
+				cleanSince = now;
+			}
 			int want = viewers <= 3 ? baseBitrateK : Math.max(1200, Math.min(baseBitrateK, (UPLOAD_BUDGET_K / viewers) / 100 * 100));
+			want = Math.min(want, lossCapK);
+			if (lastLossDrop == now && want < bitrateK) {
+				wantSince = 0; // loss: change right now, don't wait
+				lastWant = want;
+			}
 			if (want != lastWant) {
 				lastWant = want;
 				wantSince = System.currentTimeMillis();
@@ -370,11 +404,18 @@ public final class TvSender {
 					p.descendants().forEach(ProcessHandle::destroyForcibly);
 					p.destroyForcibly();
 				}
-				MultiMediaClient.info(down ? T.t("Viele Zuschauer – Bildqualität etwas runter, damit dein Internet reicht.")
-						: T.t("Weniger Zuschauer – volle Bildqualität."));
+				if (lastLossDrop == now) {
+					MultiMediaClient.info("Your upload is full – lowering stream quality so it stops freezing.");
+				} else if (lossCapK >= baseBitrateK || down) {
+					MultiMediaClient.info(down ? T.t("Viele Zuschauer – Bildqualität etwas runter, damit dein Internet reicht.")
+							: T.t("Weniger Zuschauer – volle Bildqualität."));
+				}
 			}
 		}
 	}
+
+	/** Highest bitrate the friends' connections took without losing packets (starts at a safe 3 Mbit/s). */
+	private volatile int lossCapK = 3000;
 
 	/** Monitor/Ton ändern, ohne das Senden zu beenden. False, wenn gerade nicht gesendet wird. */
 	public static synchronized boolean change(int monitor, String sound, Consumer<String> status) {
@@ -1057,6 +1098,9 @@ public final class TvSender {
 		volatile InetSocketAddress addr;
 		volatile long lastHeard = System.nanoTime();
 		int cursor = -1;
+		/** Packets sent new / asked for again (lost) since the last quality check – to notice a full upload. */
+		final java.util.concurrent.atomic.AtomicInteger sentCount = new java.util.concurrent.atomic.AtomicInteger();
+		final java.util.concurrent.atomic.AtomicInteger lostCount = new java.util.concurrent.atomic.AtomicInteger();
 		final java.util.concurrent.ConcurrentLinkedQueue<Integer> resend = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
 		UdpViewer(String name, long session, List<InetSocketAddress> candidates) {
@@ -1144,6 +1188,7 @@ public final class TvSender {
 				java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(d, P2p.HEADER, d.length - P2p.HEADER);
 				while (bb.remaining() >= 4 && v.resend.size() < 2000) {
 					v.resend.add(bb.getInt());
+					v.lostCount.incrementAndGet();
 				}
 				synchronized (newData) {
 					newData.notifyAll();
@@ -1206,6 +1251,7 @@ public final class TvSender {
 						}
 					} else if (v.cursor - produced < 0) {
 						seq = v.cursor++;
+						v.sentCount.incrementAndGet();
 					} else {
 						break;
 					}
