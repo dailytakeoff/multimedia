@@ -387,7 +387,14 @@ final class LiveFeed {
 				}
 				peer.compareAndSet(null, from);
 				if (!from.equals(peer.get())) {
-					return;
+					// the sender's router may switch ports (e.g. after a UPnP forward) – the session number is
+					// right, so follow the new address instead of dropping everything
+					if (d[1] != P2p.DATA && d[1] != P2p.PUNCH) {
+						return;
+					}
+					MultiMediaClient.LOGGER.info("Live ({}): Sender jetzt über {}", sender, P2p.format(from));
+					peer.set(from);
+					livePeer = from;
 				}
 				switch (d[1]) {
 					case P2p.DATA -> {
