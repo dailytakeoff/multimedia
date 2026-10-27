@@ -15,7 +15,8 @@
 		"GameModeMixin",
 		"HudMixin",
 		"HandsMixin",
-		"MinecraftUseMixin"
+		"MinecraftUseMixin",
+		"ChatComponentMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
