@@ -91,16 +91,14 @@ public class FloatEditScreen extends Screen {
 		this.addRenderableWidget(friend);
 		y += 34;
 
-		// ---- Size / rotation / tilt
+		// ---- Size and position
 		y = stepper(y, "Size", () -> String.format(Locale.ROOT, "%.1f blocks wide", screen.width),
 				() -> screen.width = Math.max(0.5F, screen.width - 0.5F),
 				() -> screen.width = Math.min(FloatingScreens.MAX_WIDTH, screen.width + 0.5F));
-		y = stepper(y, "Turn", () -> Math.round(((screen.yaw % 360) + 360) % 360) + "°",
-				() -> screen.yaw -= 15, () -> screen.yaw += 15);
-		y = stepper(y, "Tilt", () -> Math.round(screen.tilt) + "°",
-				() -> screen.tilt = Math.max(-90, screen.tilt - 5), () -> screen.tilt = Math.min(90, screen.tilt + 5));
 		y = stepper(y, "Up / down", () -> String.format(Locale.ROOT, "height %.2f", screen.y),
 				() -> screen.y = Math.round((screen.y - 0.25) * 100) / 100.0, () -> screen.y = Math.round((screen.y + 0.25) * 100) / 100.0);
+		y = stepper(y, "Left / right", () -> String.format(Locale.ROOT, "%+.2f blocks", sideways),
+				() -> slide(-0.25), () -> slide(0.25));
 		this.addRenderableWidget(Button.builder(Component.literal("Move to where I'm looking"), b -> FloatingScreens.placeInFront(screen))
 				.bounds(left, y, 152, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Turn to face me"), b -> FloatingScreens.faceMe(screen))
@@ -150,6 +148,18 @@ public class FloatEditScreen extends Screen {
 			FloatingScreens.remove(screen);
 			Minecraft.getInstance().gui.setScreen(parent);
 		}).bounds(cx + 55, bottom, 100, 20).build());
+	}
+
+	/** How far the screen was moved sideways in this editor (for the label). */
+	private double sideways;
+
+	/** Moves the screen along its own left/right direction (as you see it from the front). */
+	private void slide(double blocks) {
+		double th = Math.toRadians(screen.yaw);
+		// the screen's local +X is (cos yaw, 0, -sin yaw) – that's the right-hand side for someone facing its front
+		screen.x = Math.round((screen.x + Math.cos(th) * blocks) * 100) / 100.0;
+		screen.z = Math.round((screen.z - Math.sin(th) * blocks) * 100) / 100.0;
+		sideways += blocks;
 	}
 
 	/** "Label   [-]  value  [+]" row; returns the next y. */
