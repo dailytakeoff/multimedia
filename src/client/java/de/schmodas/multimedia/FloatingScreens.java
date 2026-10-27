@@ -635,8 +635,18 @@ public final class FloatingScreens {
 		}
 		Playback playback = Playback.radio(s, () -> level.getGameTime() / 20.0);
 		StreamSoundInstance sound = new StreamSoundInstance(playback, d.center(), 1F, 0);
+		sound.userVolume = Settings.screenVolume(key(d)) / 100F;
 		if (mc.getSoundManager().play(sound) != net.minecraft.client.sounds.SoundEngine.PlayResult.NOT_STARTED) {
 			SOUNDS.put(key(d), sound);
+		}
+	}
+
+	/** Your own volume for a floating screen (0–100), applied live. */
+	static void setVolume(String key, int percent) {
+		Settings.setScreenVolume(key, percent);
+		StreamSoundInstance s = SOUNDS.get(key);
+		if (s != null) {
+			s.userVolume = percent / 100F;
 		}
 	}
 
@@ -821,7 +831,7 @@ public final class FloatingScreens {
 		Source video = Source.parse(target.content);
 		java.util.function.Consumer<String> actions = mine ? a -> action(target, a) : null;
 		mc.gui.setScreen(new TouchScreen(PLAYERS.get(key(target)), video, actions, false,
-				mine ? null : target.owner, bu, bv));
+				mine ? null : target.owner, bu, bv).withVolumeKey(key(target)));
 		return true;
 	}
 }

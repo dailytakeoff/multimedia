@@ -205,6 +205,11 @@ public class MenuScreen extends Screen {
 			}
 		}
 
+		// ---- Volume
+		this.addRenderableWidget(new VolumeSlider(left, y, 310, "Volume (all MultiMedia sound)", Settings.masterVolume(),
+				Settings::setMasterVolume));
+		y += 24;
+
 		// ---- Quality
 		int q = Settings.videoQuality();
 		String[] names = {"Normal (480p)", "High (720p)", "Very high (1080p)"};

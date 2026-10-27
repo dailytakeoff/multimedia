@@ -117,9 +117,10 @@ public final class Occlusion {
 						: RoomAcoustics.Reverb.NONE;
 			}
 			// ... aber jeden Tick ein kleines Stück dorthin gleiten: Sprünge in der Lautstärke knacken hörbar.
-			float wantGain = Math.max(0.001F, inst.targetGain * inst.userVolume); // inkl. Schild-Lautstärke
+			float master = Settings.masterVolume() / 100F; // Lautstärke-Regler im Menü
+			float wantGain = Math.max(0.001F, inst.targetGain * inst.userVolume * master); // inkl. Schild-Lautstärke
 			float wantHf = Math.max(0.001F, inst.targetGainHf);
-			float wantBass = Math.max(0.001F, inst.targetBass * inst.userVolume);
+			float wantBass = Math.max(0.001F, inst.targetBass * inst.userVolume * master);
 			boolean first = inst.appliedSettings == -1;
 			float gain = first ? wantGain : glide(inst.appliedGain, wantGain, MAX_GAIN_STEP);
 			float gainHf = first ? wantHf : glide(inst.appliedGainHf, wantHf, MAX_HF_STEP);

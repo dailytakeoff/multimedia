@@ -39,6 +39,10 @@ public final class Settings {
 		int tvMonitor = 0;
 		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
 		String camDevice;
+		/** Volume of everything the mod plays, 0–100. */
+		int masterVolume = 100;
+		/** Your own volume per floating screen ("owner/id" -> 0–100). */
+		java.util.Map<String, Integer> screenVolumes = new java.util.HashMap<>();
 		/** Video quality: 0 normal (480p), 1 high (720p), 2 very high (1080p). */
 		int videoQuality = 1;
 		/** Players known to have the mod (lower case), see ModPeers. */
@@ -268,6 +272,58 @@ public final class Settings {
 		}
 		data.tvSources.put(player.toLowerCase(java.util.Locale.ROOT), source);
 		save();
+	}
+
+	public static int masterVolume() {
+		return Math.max(0, Math.min(100, data.masterVolume));
+	}
+
+	public static void setMasterVolume(int v) {
+		data.masterVolume = Math.max(0, Math.min(100, v));
+		saveSoon();
+	}
+
+	public static synchronized int screenVolume(String key) {
+		Integer v = data.screenVolumes == null ? null : data.screenVolumes.get(key);
+		return v == null ? 100 : Math.max(0, Math.min(100, v));
+	}
+
+	public static synchronized void setScreenVolume(String key, int v) {
+		if (data.screenVolumes == null) {
+			data.screenVolumes = new java.util.HashMap<>();
+		}
+		if (v >= 100) {
+			data.screenVolumes.remove(key);
+		} else if (data.screenVolumes.size() < 500 || data.screenVolumes.containsKey(key)) {
+			data.screenVolumes.put(key, Math.max(0, v));
+		}
+		saveSoon();
+	}
+
+	private static volatile long saveAt;
+
+	/** Sliders change a lot while dragging: save once, a second after the last change. */
+	private static void saveSoon() {
+		boolean scheduled = saveAt != 0;
+		saveAt = System.currentTimeMillis() + 1000;
+		if (scheduled) {
+			return;
+		}
+		Thread t = new Thread(() -> {
+			while (System.currentTimeMillis() < saveAt) {
+				try {
+					Thread.sleep(200);
+				} catch (InterruptedException e) {
+					return;
+				}
+			}
+			saveAt = 0;
+			synchronized (Settings.class) {
+				save();
+			}
+		}, "MultiMedia-SaveSettings");
+		t.setDaemon(true);
+		t.start();
 	}
 
 	public static int videoQuality() {

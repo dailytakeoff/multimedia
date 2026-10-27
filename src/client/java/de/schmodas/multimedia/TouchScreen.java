@@ -40,6 +40,13 @@ public class TouchScreen extends Screen {
 	private double lastV = -1;
 	private String lastControl = "";
 	private Button requestButton;
+	/** Floating screen key for the volume slider, or null (wall screens: volume comes from the jukeboxes). */
+	private String volumeKey;
+
+	TouchScreen withVolumeKey(String key) {
+		this.volumeKey = key;
+		return this;
+	}
 
 	/** Screen on a wall with a sign: video controls change the sign (works for everyone who can edit it). */
 	TouchScreen(BlockPos signPos, String spec, ScreenSource source, Source video, double tapU, double tapV) {
@@ -70,7 +77,7 @@ public class TouchScreen extends Screen {
 	/** Picture area: as big as fits above the buttons, 16:9. */
 	private int[] area() {
 		int maxW = this.width - 20;
-		int maxH = this.height - 64;
+		int maxH = this.height - (volumeKey != null ? 88 : 64);
 		int w = maxW;
 		int h = w * 9 / 16;
 		if (h > maxH) {
@@ -97,6 +104,11 @@ public class TouchScreen extends Screen {
 	protected void init() {
 		int y = this.height - 30;
 		int cx = this.width / 2;
+		if (volumeKey != null) {
+			String key = volumeKey;
+			this.addRenderableWidget(new VolumeSlider(cx - 154, y - 24, 308, "Volume (just for you)",
+					Settings.screenVolume(key), v -> FloatingScreens.setVolume(key, v)));
+		}
 		if (video != null && actions == null) {
 			this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
 					.bounds(cx - 31, y, 62, 20).build());
