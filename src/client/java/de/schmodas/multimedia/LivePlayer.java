@@ -46,7 +46,7 @@ public final class LivePlayer implements ScreenSource {
 	@Override
 	public void upload() {
 		if (texture == null) {
-			texture = new VideoPlayer.VideoTexture(textureId);
+			texture = new VideoPlayer.VideoTexture(textureId, feed.width, feed.height);
 			Minecraft.getInstance().getTextureManager().register(textureId, texture);
 		}
 		long seq = feed.copyFrame(uploadedSeq, texture.getPixels().getPointer());

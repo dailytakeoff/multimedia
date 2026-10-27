@@ -28,12 +28,20 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * pro Bild wird gewartet, bis seine Zeit gekommen ist, und es dann zum Hochladen bereitgelegt.
  */
 public final class VideoPlayer implements ScreenSource {
-	public static final int WIDTH = 854;
-	public static final int HEIGHT = 480;
+	/** Picture size on screens, from the quality setting at start-up (changing it needs a restart). */
+	public static final int WIDTH = switch (Settings.videoQuality()) {
+		case 0 -> 854;
+		case 2 -> 1920;
+		default -> 1280;
+	};
+	public static final int HEIGHT = WIDTH * 9 / 16;
+	/** Quality the screens were set up with this session (the menu shows "restart" if it differs). */
+	static final int QUALITY_AT_START = Settings.videoQuality();
 	private static final int FPS = 30;
 	private static final int FRAME_BYTES = WIDTH * HEIGHT * 4;
 	/** Video-Formate bis 480p (der Bildschirm hat eh nur so viele Pixel), H.264 bevorzugt. */
-	private static final String FORMAT = "bestvideo[height<=480][vcodec^=avc1]/bestvideo[height<=480]/best[height<=480]/best";
+	private static final String FORMAT = "bestvideo[height<=" + HEIGHT + "][vcodec^=avc1]/bestvideo[height<=" + HEIGHT
+			+ "]/best[height<=" + HEIGHT + "]/best";
 	/** Bild so viel früher anfordern, wie das Starten von ffmpeg etwa dauert. */
 	/** Gelernte Startzeit von ffmpeg (bis das erste Bild da ist) + Reserve – so weit vorne wird angefangen. */
 	private static volatile double learnedLead = 3.0;
@@ -546,8 +554,12 @@ public final class VideoPlayer implements ScreenSource {
 	/** Textur für das Videobild: weich skaliert (nicht pixelig), am Rand nicht wiederholt, anfangs schwarz. */
 	static final class VideoTexture extends DynamicTexture {
 		VideoTexture(Identifier id) {
-			super(id::toString, WIDTH, HEIGHT, false);
-			getPixels().fillRect(0, 0, WIDTH, HEIGHT, 0xFF000000);
+			this(id, WIDTH, HEIGHT);
+		}
+
+		VideoTexture(Identifier id, int w, int h) {
+			super(id::toString, w, h, false);
+			getPixels().fillRect(0, 0, w, h, 0xFF000000);
 			this.sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
 			upload();
 		}

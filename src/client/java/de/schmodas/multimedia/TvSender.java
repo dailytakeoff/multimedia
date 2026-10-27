@@ -33,7 +33,16 @@ import java.util.function.Consumer;
 public final class TvSender {
 	static final String HELLO = "MMTV1 ";
 	private static final boolean WINDOWS = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
-	private static final String SCALE = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2";
+	/** Sent picture size and bitrate, from the quality setting when sharing starts (0 normal, 1 high, 2 very high). */
+	private final int sendW = Settings.videoQuality() >= 2 ? 1920 : 1280;
+	private final int sendH = Settings.videoQuality() >= 2 ? 1080 : 720;
+	private final int baseBitrateK = switch (Settings.videoQuality()) {
+		case 0 -> 3000;
+		case 2 -> 8000;
+		default -> 4500;
+	};
+	private final String SCALE = "scale=" + sendW + ":" + sendH + ":force_original_aspect_ratio=decrease,pad=" + sendW + ":" + sendH
+			+ ":(ow-iw)/2:(oh-ih)/2";
 	/** Puffer pro Zuschauer; ist er voll (zu langsames Internet), wird der Zuschauer getrennt und verbindet neu. */
 	private static final int VIEWER_QUEUE = 512;
 
@@ -58,7 +67,7 @@ public final class TvSender {
 	/** Bitrate des Bildes (kbit/s): bis 3 Zuschauer 3000, darüber weniger, damit der Upload reicht. */
 	private volatile int bitrateK = 3000;
 	/** So viel Upload dürfen alle Zuschauer zusammen ungefähr brauchen (kbit/s). */
-	private static final int UPLOAD_BUDGET_K = 10_000;
+	private final int UPLOAD_BUDGET_K = Math.max(10_000, 2 * baseBitrateK);
 	private volatile Consumer<String> changeStatus;
 	private final List<Process> processes = new CopyOnWriteArrayList<>();
 	private final List<Viewer> viewers = new CopyOnWriteArrayList<>();
@@ -83,7 +92,7 @@ public final class TvSender {
 	private volatile int producedSeq;
 	private final Object newData = new Object();
 	/** Höchstens so viel hochladen (Bytes/s, alle Zuschauer zusammen) – lässt bei 17 Mbit/s Luft. */
-	private static final double MAX_UPLOAD = 13_000_000 / 8.0;
+	private final double MAX_UPLOAD = Math.max(13_000, UPLOAD_BUDGET_K * 1.3) * 1000 / 8.0;
 
 	private TvSender(int monitor, String sound) {
 		this(monitor, sound, false, null);
@@ -97,9 +106,7 @@ public final class TvSender {
 		if (cam) {
 			this.window = null;
 		}
-		if (cam) {
-			this.bitrateK = 800;
-		}
+		this.bitrateK = cam ? 800 : baseBitrateK;
 	}
 
 	public static boolean isSending() {
@@ -277,7 +284,7 @@ public final class TvSender {
 		while (!stopped) {
 			P2p.sleep(2000);
 			int viewers = viewerCount();
-			int want = viewers <= 3 ? 3000 : Math.max(1200, (UPLOAD_BUDGET_K / viewers) / 100 * 100);
+			int want = viewers <= 3 ? baseBitrateK : Math.max(1200, Math.min(baseBitrateK, (UPLOAD_BUDGET_K / viewers) / 100 * 100));
 			if (want != lastWant) {
 				lastWant = want;
 				wantSince = System.currentTimeMillis();
@@ -495,7 +502,7 @@ public final class TvSender {
 			List<String> ddaVf = List.of("-vf", "hwdownload,format=bgra," + SCALE);
 			// am sparsamsten: Bild bleibt komplett auf der Grafikkarte (aufnehmen, verkleinern, umwandeln)
 			List<String> ddaGpu = List.of("-f", "lavfi", "-i", "ddagrab=output_idx=" + monitor
-					+ ":framerate=30:draw_mouse=0,scale_d3d11=width=1280:height=720:format=nv12");
+					+ ":framerate=30:draw_mouse=0,scale_d3d11=width=" + sendW + ":height=" + sendH + ":format=nv12");
 			List<String> nvencGpu = List.of("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", "-b:v", bitrate,
 					"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0");
 			out.add(new Variant("Grafikkarte", ddaGpu, nvencGpu));

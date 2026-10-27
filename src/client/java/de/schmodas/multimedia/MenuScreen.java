@@ -205,6 +205,17 @@ public class MenuScreen extends Screen {
 			}
 		}
 
+		// ---- Quality
+		int q = Settings.videoQuality();
+		String[] names = {"Normal (480p)", "High (720p)", "Very high (1080p)"};
+		this.addRenderableWidget(Button.builder(Component.literal("Quality: " + names[q] + (q != VideoPlayer.QUALITY_AT_START ? " – restart" : "")), b -> {
+			Settings.setVideoQuality((Settings.videoQuality() + 1) % 3);
+			rebuildWidgets();
+		}).bounds(left, y, 310, 20).tooltip(Tooltip.create(Component.literal(
+				"Sharper videos and screen shares, but more upload, CPU and graphics memory. Videos on screens change after "
+						+ "restarting Minecraft; your screen share uses it the next time you start sharing."))).build());
+		y += 24;
+
 		// ---- Bottom
 		int bottom = Math.max(y + 6, this.height - 28);
 		this.addRenderableWidget(Button.builder(Component.literal("Settings …"), b ->

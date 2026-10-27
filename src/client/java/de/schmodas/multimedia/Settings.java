@@ -39,6 +39,8 @@ public final class Settings {
 		int tvMonitor = 0;
 		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
 		String camDevice;
+		/** Video quality: 0 normal (480p), 1 high (720p), 2 very high (1080p). */
+		int videoQuality = 1;
 		/** Players known to have the mod (lower case), see ModPeers. */
 		java.util.Set<String> knownModPlayers = new java.util.TreeSet<>();
 		/** Own floating screens per server address. */
@@ -265,6 +267,15 @@ public final class Settings {
 			data.tvSources = new java.util.TreeMap<>();
 		}
 		data.tvSources.put(player.toLowerCase(java.util.Locale.ROOT), source);
+		save();
+	}
+
+	public static int videoQuality() {
+		return Math.max(0, Math.min(2, data.videoQuality));
+	}
+
+	public static void setVideoQuality(int q) {
+		data.videoQuality = Math.max(0, Math.min(2, q));
 		save();
 	}
 

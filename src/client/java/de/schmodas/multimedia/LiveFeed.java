@@ -28,11 +28,16 @@ import java.util.concurrent.TimeUnit;
 final class LiveFeed {
 	static final int WIDTH = VideoPlayer.WIDTH;
 	static final int HEIGHT = VideoPlayer.HEIGHT;
-	static final int FRAME_BYTES = WIDTH * HEIGHT * 4;
+	/** Webcams are small above heads – a full-size picture would only waste memory and upload time. */
+	static final int CAM_WIDTH = 640;
+	static final int CAM_HEIGHT = 360;
 	/** So viel später als ankommend ist der Ton in den Jukeboxen zu hören (siehe StreamHub, Live-Vorlauf). */
 	static final double AUDIO_DELAY = 1.2;
-	private static final String VF = "scale=" + WIDTH + ":" + HEIGHT + ":force_original_aspect_ratio=decrease,"
-			+ "pad=" + WIDTH + ":" + HEIGHT + ":(ow-iw)/2:(oh-ih)/2:color=black";
+	/** Picture size of this feed (screen share: quality setting, webcam: CAM_*). */
+	final int width;
+	final int height;
+	private final int frameBytes;
+	private final String vf;
 	/** Ton in Blöcken von 50 ms (48 kHz, Stereo, 16 Bit). */
 	private static final int AUDIO_BLOCK = 48000 / 20 * 4;
 
@@ -59,8 +64,8 @@ final class LiveFeed {
 	private volatile String status = T.t("Verbinde …");
 
 	// Bild: zwei Puffer (einer wird gefüllt, einer ist fertig)
-	private ByteBuffer back = MemoryUtil.memAlloc(FRAME_BYTES);
-	private ByteBuffer ready = MemoryUtil.memAlloc(FRAME_BYTES);
+	private ByteBuffer back;
+	private ByteBuffer ready;
 	private long readySeq;
 	private volatile boolean hasFrame;
 	/** Wie viel später als bei Ankunft der Ton gerade in den Jukeboxen zu hören ist (geglättet). */
@@ -70,6 +75,13 @@ final class LiveFeed {
 		this.key = key;
 		this.sender = sender;
 		this.cam = cam;
+		this.width = cam ? CAM_WIDTH : WIDTH;
+		this.height = cam ? CAM_HEIGHT : HEIGHT;
+		this.frameBytes = width * height * 4;
+		this.vf = "scale=" + width + ":" + height + ":force_original_aspect_ratio=decrease,"
+				+ "pad=" + width + ":" + height + ":(ow-iw)/2:(oh-ih)/2:color=black";
+		this.back = MemoryUtil.memAlloc(frameBytes);
+		this.ready = MemoryUtil.memAlloc(frameBytes);
 		this.displayName = sender;
 		this.target = target;
 		Thread t = new Thread(this::run, "MultiMedia-Live");
@@ -182,7 +194,7 @@ final class LiveFeed {
 		if (readySeq == seq || ready == null) {
 			return seq;
 		}
-		MemoryUtil.memCopy(MemoryUtil.memAddress0(ready), dst, FRAME_BYTES);
+		MemoryUtil.memCopy(MemoryUtil.memAddress0(ready), dst, frameBytes);
 		return readySeq;
 	}
 
@@ -457,7 +469,7 @@ final class LiveFeed {
 	private void decode(Tools.Paths paths, InputStream in) throws IOException, InterruptedException {
 		{
 			MultiMediaClient.LOGGER.info("Live ({}): verbunden", sender);
-			Process video = ffmpeg(paths, "bild", List.of("-map", "0:v:0", "-vf", VF, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"));
+			Process video = ffmpeg(paths, "bild", List.of("-map", "0:v:0", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"));
 			Process audio = ffmpeg(paths, "ton", List.of("-map", "0:a:0?", "-ar", "48000", "-ac", "2", "-f", "s16le", "pipe:1"));
 			BlockingQueue<Packet> delayed = new LinkedBlockingQueue<>();
 			// Netz -> Ton sofort, Bild in die Warteschlange
