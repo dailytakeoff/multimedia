@@ -126,6 +126,19 @@ public class SendScreen extends Screen {
 		});
 	}
 
+	/** Windows: sharing one app sends only that app's sound (if its program is known). */
+	private void useAppSound() {
+		String exe = TvSender.appExe(app);
+		if (!WINDOWS || !appMode || exe == null || soundMode.equals("off")) {
+			return;
+		}
+		soundMode = "only";
+		program = exe;
+		if (programs.stream().noneMatch(exe::equalsIgnoreCase)) {
+			programs.add(exe);
+		}
+	}
+
 	private void loadApps() {
 		appsLoading = true;
 		Thread t = new Thread(() -> {
@@ -136,6 +149,7 @@ public class SendScreen extends Screen {
 				if (app == null && !apps.isEmpty()) {
 					app = apps.get(0);
 				}
+				useAppSound();
 				appsLoading = false;
 				rebuildWidgets();
 			});
@@ -160,6 +174,10 @@ public class SendScreen extends Screen {
 		// whole monitor or one app
 		this.addRenderableWidget(Button.builder(Component.literal(appMode ? "Share: one app ▸" : "Share: whole monitor ▸"), b -> {
 			appMode = !appMode;
+			useAppSound();
+			if (appMode && !WINDOWS && soundMode.equals("all")) {
+				soundMode = "only"; // Linux: pick the app's sound in the list next to it
+			}
 			rebuildWidgets();
 		}).bounds(this.width / 2 - 154, y, 308, 20).tooltip(Tooltip.create(Component.literal(appMode
 				? "Only that app's window is sent – your other windows stay private."
@@ -174,6 +192,7 @@ public class SendScreen extends Screen {
 				}
 				int i = app == null ? -1 : apps.indexOf(app);
 				app = apps.get((i + 1) % apps.size());
+				useAppSound();
 				rebuildWidgets();
 			}).bounds(this.width / 2 - 154, previewTop() + PREVIEW_H / 2 - 10, 280, 20).tooltip(Tooltip.create(Component.literal(
 					"Click to pick the next app. Keep it open (not minimised) while sharing; if its title changes a lot, pick it again."))).build());
@@ -185,7 +204,7 @@ public class SendScreen extends Screen {
 		boolean withProgram = soundMode.equals("except") || soundMode.equals("only");
 		this.addRenderableWidget(Button.builder(Component.literal(soundLabel()), b -> {
 			soundMode = switch (soundMode) {
-				case "all" -> "except";
+				case "all" -> WINDOWS ? "except" : "only"; // Linux: only one app or everything
 				case "except" -> "only";
 				case "only" -> "off";
 				default -> "all";

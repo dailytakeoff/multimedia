@@ -154,6 +154,72 @@ public final class TvSender {
 		}
 	}
 
+	// ------------------------------------------------------------------ Linux: sound of one app (PulseAudio / PipeWire-Pulse)
+
+	/** One app playing sound: its stream number and name, from "pactl list sink-inputs". */
+	private record SinkInput(int index, String name) {
+	}
+
+	private static List<SinkInput> sinkInputs() {
+		List<SinkInput> out = new ArrayList<>();
+		try {
+			ProcessBuilder pb = new ProcessBuilder("pactl", "list", "sink-inputs").redirectErrorStream(true);
+			pb.environment().put("LC_ALL", "C");
+			Process p = pb.start();
+			String text = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+			p.waitFor(5, TimeUnit.SECONDS);
+			int index = -1;
+			String name = null;
+			for (String line : text.split("\\R")) {
+				String t = line.trim();
+				if (t.startsWith("Sink Input #")) {
+					if (index >= 0 && name != null) {
+						out.add(new SinkInput(index, name));
+					}
+					name = null;
+					try {
+						index = Integer.parseInt(t.substring("Sink Input #".length()).trim());
+					} catch (NumberFormatException e) {
+						index = -1;
+					}
+				} else if (t.startsWith("application.name = ") && name == null) {
+					name = t.substring("application.name = ".length()).replace("\"", "").trim();
+				}
+			}
+			if (index >= 0 && name != null) {
+				out.add(new SinkInput(index, name));
+			}
+		} catch (Exception e) {
+			MultiMediaClient.LOGGER.info("pactl ging nicht: {}", e.toString());
+		}
+		out.removeIf(si -> si.name().isBlank() || !si.name().matches("[^,|\\r\\n]{1,80}"));
+		return out;
+	}
+
+	/** Apps that are playing sound right now (Minecraft itself left out). */
+	private static List<String> linuxAudioApps() {
+		List<String> out = new ArrayList<>();
+		for (SinkInput si : sinkInputs()) {
+			String n = si.name();
+			if (!n.toLowerCase(Locale.ROOT).contains("minecraft") && !n.equalsIgnoreCase("java") && !n.equalsIgnoreCase("OpenAL Soft")
+					&& !out.contains(n)) {
+				out.add(n);
+			}
+		}
+		return out;
+	}
+
+	/** Recorder for one app's sound, started right after ffmpeg (it writes into a FIFO ffmpeg reads). */
+	private volatile List<String> pendingRecorder;
+	private volatile java.nio.file.Path pendingFifo;
+
+	/** Program file of each app window from the last appWindows() (title -> e.g. "Discord.exe"). */
+	static final Map<String, String> APP_EXE = new ConcurrentHashMap<>();
+
+	public static String appExe(String title) {
+		return title == null ? null : APP_EXE.get(title);
+	}
+
 	/** Open app windows by title (Windows, via the bundled helper); empty elsewhere or if the helper is missing. */
 	public static List<String> appWindows() {
 		List<String> out = new ArrayList<>();
@@ -169,12 +235,16 @@ public final class TvSender {
 			String text = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 			p.waitFor(5, TimeUnit.SECONDS);
 			for (String line : text.split("\\R")) {
-				String[] parts = line.trim().split(" ", 2);
-				if (parts.length == 2 && parts[0].equals("window")) {
+				String[] parts = line.trim().split(" ");
+				if (parts.length >= 2 && parts[0].equals("window")) {
 					try {
 						String title = new String(java.util.Base64.getDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+						String exe = parts.length >= 3 ? new String(java.util.Base64.getDecoder().decode(parts[2]), StandardCharsets.UTF_8) : "";
 						if (!title.isBlank() && !out.contains(title) && !title.equals("Program Manager")) {
 							out.add(title);
+							if (exe.matches("[^,|\\r\\n]{1,80}")) {
+								APP_EXE.put(title, exe);
+							}
 						}
 					} catch (IllegalArgumentException ignored) {
 					}
@@ -654,6 +724,36 @@ public final class TvSender {
 		if (helper != null) {
 			return List.of("-f", "s16le", "-ar", "48000", "-ac", "2", "-i", "pipe:0");
 		}
+		pendingRecorder = null;
+		pendingFifo = null;
+		if (!WINDOWS && !cam && sound.startsWith("only:")) {
+			// Linux, one app: record just its stream (parec --monitor-stream) into a FIFO
+			String app = sound.substring(5);
+			SinkInput match = null;
+			for (SinkInput si : sinkInputs()) {
+				if (si.name().equalsIgnoreCase(app)) {
+					match = si;
+					break;
+				}
+			}
+			if (match != null && onPath("parec") && onPath("mkfifo")) {
+				try {
+					java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("multimedia-audio");
+					java.nio.file.Path fifo = dir.resolve("app.pcm");
+					Process mk = new ProcessBuilder("mkfifo", fifo.toString()).start();
+					if (mk.waitFor(5, TimeUnit.SECONDS) && mk.exitValue() == 0) {
+						pendingFifo = fifo;
+						pendingRecorder = List.of("parec", "--monitor-stream=" + match.index(), "--format=s16le", "--rate=48000",
+								"--channels=2", "--raw", "--latency-msec=40");
+						soundInfo = "sound: only " + app;
+						return List.of("-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "512", "-i", fifo.toString());
+					}
+				} catch (Exception e) {
+					MultiMediaClient.LOGGER.info("App-Ton ging nicht: {}", e.toString());
+				}
+			}
+			soundInfo = match == null ? "sound: whole PC (" + app + " isn't playing anything)" : "sound: whole PC (parec missing)";
+		}
 		if (!WINDOWS && !cam && !sound.equals("off")) {
 			// Linux: everything the PC plays (PulseAudio / PipeWire-Pulse), Minecraft included
 			return List.of("-f", "pulse", "-thread_queue_size", "512", "-sample_rate", "48000", "-channels", "2",
@@ -669,7 +769,7 @@ public final class TvSender {
 			return null;
 		}
 		if (!WINDOWS) {
-			soundInfo = "sound: whole PC";
+			soundInfo = sound.startsWith("only:") ? "sound: only " + sound.substring(5) : "sound: whole PC";
 			return null;
 		}
 		java.nio.file.Path helper = Tools.audioHelper();
@@ -732,6 +832,22 @@ public final class TvSender {
 		}
 		Process p = started.get(started.size() - 1);
 		logErrors(p, v.name);
+		List<String> recorder = pendingRecorder;
+		java.nio.file.Path fifo = pendingFifo;
+		if (recorder != null && fifo != null) {
+			// opening the FIFO for writing waits until ffmpeg reads it – so in its own thread
+			Thread rec = new Thread(() -> {
+				try {
+					Process r = new ProcessBuilder(recorder).redirectOutput(fifo.toFile()).start();
+					processes.add(r);
+					logErrors(r, "ton");
+				} catch (IOException e) {
+					MultiMediaClient.LOGGER.info("parec startet nicht: {}", e.toString());
+				}
+			}, "MultiMedia-AppAudio");
+			rec.setDaemon(true);
+			rec.start();
+		}
 		// auf erste Daten warten
 		InputStream in = p.getInputStream();
 		long deadline = System.currentTimeMillis() + v.waitMs;
@@ -788,9 +904,12 @@ public final class TvSender {
 
 	/** Programme, die gerade Ton machen (für die Auswahl im Menü). */
 	public static List<String> audioPrograms() {
+		if (!WINDOWS) {
+			return linuxAudioApps();
+		}
 		java.nio.file.Path helper = Tools.audioHelper();
 		if (helper == null) {
-			return List.of(); // Linux: no per-program sound, the whole PC is sent
+			return List.of();
 		}
 		try {
 			Process p = new ProcessBuilder(helper.toString(), "list", Long.toString(ProcessHandle.current().pid())).start();

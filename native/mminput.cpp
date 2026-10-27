@@ -63,7 +63,22 @@ static BOOL CALLBACK listWindow(HWND hwnd, LPARAM) {
 	std::wstring title((size_t)len + 1, L'\0');
 	GetWindowTextW(hwnd, &title[0], len + 1);
 	title.resize((size_t)len);
-	printf("window %s\n", b64encode(utf8(title)).c_str());
+	// program file name (e.g. "Discord.exe"), so the mod can send only that app's sound
+	std::string exe;
+	DWORD pid = 0;
+	GetWindowThreadProcessId(hwnd, &pid);
+	HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	if (proc) {
+		wchar_t path[MAX_PATH];
+		DWORD size = MAX_PATH;
+		if (QueryFullProcessImageNameW(proc, 0, path, &size)) {
+			std::wstring p(path, size);
+			size_t slash = p.find_last_of(L"\\/");
+			exe = utf8(slash == std::wstring::npos ? p : p.substr(slash + 1));
+		}
+		CloseHandle(proc);
+	}
+	printf("window %s %s\n", b64encode(utf8(title)).c_str(), b64encode(exe).c_str());
 	return TRUE;
 }
 
