@@ -41,7 +41,7 @@ public final class TvSender {
 		case 2 -> 8000;
 		default -> 4500;
 	};
-	private final String SCALE = "scale=" + sendW + ":" + sendH + ":force_original_aspect_ratio=decrease,pad=" + sendW + ":" + sendH
+	private final String SCALE = "scale=" + sendW + ":" + sendH + ":force_original_aspect_ratio=decrease:flags=lanczos,pad=" + sendW + ":" + sendH
 			+ ":(ow-iw)/2:(oh-ih)/2";
 	/** Puffer pro Zuschauer; ist er voll (zu langsames Internet), wird der Zuschauer getrennt und verbindet neu. */
 	private static final int VIEWER_QUEUE = 512;
@@ -481,8 +481,13 @@ public final class TvSender {
 	private List<Variant> variants() {
 		String bitrate = bitrateK + "k";
 		String bufsize = (bitrateK / 2) + "k";
-		List<String> nvenc = List.of("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", "-b:v", bitrate,
-				"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
+		// p5 + adaptive quantisation: more detail where it shows (text, faces) at the same bitrate, still low delay
+		List<String> nvenc = List.of("-c:v", "h264_nvenc", "-preset", "p5", "-tune", "ll", "-rc", "cbr", "-spatial-aq", "1",
+				"-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
+		List<String> amf = List.of("-c:v", "h264_amf", "-usage", "lowlatency", "-quality", "quality", "-rc", "cbr",
+				"-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
+		List<String> qsv = List.of("-c:v", "h264_qsv", "-preset", "medium", "-low_power", "0", "-b:v", bitrate,
+				"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "nv12");
 		List<String> x264 = List.of("-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-b:v", bitrate,
 				"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
 		if (cam) {
@@ -494,6 +499,8 @@ public final class TvSender {
 			// one app window (GDI): graphics card if possible, else processor
 			List<String> gdi = List.of("-f", "gdigrab", "-framerate", "30", "-draw_mouse", "1", "-i", "title=" + win);
 			out.add(new Variant("App (Grafikkarte)", gdi, concat(List.of("-vf", SCALE + ",format=yuv420p"), nvenc)));
+			out.add(new Variant("App (AMD)", gdi, concat(List.of("-vf", SCALE), amf)));
+			out.add(new Variant("App (Intel)", gdi, concat(List.of("-vf", SCALE), qsv)));
 			out.add(new Variant("App (Prozessor)", gdi, concat(List.of("-vf", SCALE), x264)));
 			return out;
 		}
@@ -503,10 +510,13 @@ public final class TvSender {
 			// am sparsamsten: Bild bleibt komplett auf der Grafikkarte (aufnehmen, verkleinern, umwandeln)
 			List<String> ddaGpu = List.of("-f", "lavfi", "-i", "ddagrab=output_idx=" + monitor
 					+ ":framerate=30:draw_mouse=0,scale_d3d11=width=" + sendW + ":height=" + sendH + ":format=nv12");
-			List<String> nvencGpu = List.of("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", "-b:v", bitrate,
-					"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0");
+			List<String> nvencGpu = List.of("-c:v", "h264_nvenc", "-preset", "p5", "-tune", "ll", "-rc", "cbr", "-spatial-aq", "1",
+					"-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0");
 			out.add(new Variant("Grafikkarte", ddaGpu, nvencGpu));
 			out.add(new Variant("Grafikkarte+Prozessor", dda, concat(ddaVf, nvenc)));
+			// AMD / Intel graphics (a missing encoder fails at once and the next one is tried)
+			out.add(new Variant("Grafikkarte (AMD)", dda, concat(ddaVf, amf)));
+			out.add(new Variant("Grafikkarte (Intel)", dda, concat(ddaVf, qsv)));
 			out.add(new Variant("Prozessor", dda, concat(ddaVf, x264)));
 			out.add(new Variant("Prozessor, ganzer Desktop", List.of("-f", "gdigrab", "-framerate", "30", "-i", "desktop"),
 					concat(List.of("-vf", SCALE), x264)));
@@ -535,7 +545,7 @@ public final class TvSender {
 						null, null, 60_000));
 			}
 			if (wayland && onPath("gpu-screen-recorder")) {
-				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-c", "mkv",
+				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-q", "very_high", "-c", "mkv",
 						"-o", "/dev/stdout");
 				out.add(new Variant("gpu-screen-recorder", fromPipe, scaled, gsr, null, 60_000));
 			}
@@ -551,13 +561,14 @@ public final class TvSender {
 			}
 			if (onPath("wf-recorder")) {
 				// wlroots desktops (Hyprland, Sway, Niri …). With several monitors it asks which one on stdin -> answer it.
+				// near-lossless in-between step (crf 16), so our own encode gets a clean picture
 				List<String> wf = List.of("wf-recorder", "-y", "-r", "30", "-c", "libx264", "-p", "preset=ultrafast",
-						"-p", "tune=zerolatency", "-m", "matroska", "-f", "/dev/stdout");
+						"-p", "tune=zerolatency", "-p", "crf=16", "-m", "matroska", "-f", "/dev/stdout");
 				out.add(new Variant("wf-recorder", fromPipe, scaled, wf, (monitor + 1) + "\n", 15_000));
 			}
 			if (onPath("gpu-screen-recorder")) {
 				// works on every Wayland desktop through the screen-share portal (the desktop asks which screen)
-				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-c", "mkv",
+				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-q", "very_high", "-c", "mkv",
 						"-o", "/dev/stdout");
 				out.add(new Variant("gpu-screen-recorder", fromPipe, scaled, gsr, null, 60_000));
 			}
