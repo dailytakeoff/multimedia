@@ -15,23 +15,28 @@ jobs:
           distribution: temurin
           java-version: '25'
       - name: Install MinGW-w64
-        timeout-minutes: 12
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Ubuntu's mirrors sometimes hang: give each try 3 minutes and retry
-          for i in 1 2 3; do
-            if timeout 180 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update \
-              && timeout 180 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends g++-mingw-w64-x86-64; then
-              exit 0
-            fi
-            echo "try $i failed, retrying"; sleep 10
-          done
-          exit 1
+          # llvm-mingw from GitHub (Ubuntu's mirrors are sometimes unreachable from the runners); apt as fallback
+          url=$(gh api repos/mstorsjo/llvm-mingw/releases/latest \
+            --jq '.assets[] | select(.name | test("ucrt-ubuntu-22.04-x86_64.tar.xz$")) | .browser_download_url' | head -1)
+          if [ -n "$url" ] && curl -fsSL --retry 3 "$url" -o /tmp/llvm-mingw.tar.xz; then
+            mkdir -p /tmp/llvm-mingw && tar -xJf /tmp/llvm-mingw.tar.xz -C /tmp/llvm-mingw --strip-components=1
+            echo "/tmp/llvm-mingw/bin" >> "$GITHUB_PATH"
+            exit 0
+          fi
+          timeout 300 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          timeout 300 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends g++-mingw-w64-x86-64
       - name: Build audio helper from native/mmaudio.cpp
-        run: ./scripts/build-audio-helper.sh
+        run: |
+          set -o pipefail
+          ./scripts/build-audio-helper.sh 2>&1 | tee build.log
       - name: Build mod
         run: |
           set -o pipefail
-          ./gradlew build --no-daemon 2>&1 | tee build.log
+          ./gradlew build --no-daemon 2>&1 | tee -a build.log
       - name: Report compile errors as annotations
         if: failure()
         run: |
