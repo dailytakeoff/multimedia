@@ -25,3 +25,4 @@ hs_err_*.log
 
 # built by CI from native/mmaudio.cpp (see README)
 src/client/resources/multimedia/mmaudio.exe
+src/client/resources/multimedia/mminput.exe

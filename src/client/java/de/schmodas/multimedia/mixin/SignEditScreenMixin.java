@@ -344,7 +344,7 @@ public abstract class SignEditScreenMixin extends Screen {
 					T.t("Anderen Monitor oder Ton wählen, weitere Freunde einladen – Zuschauer bleiben dabei.")))).build());
 			this.addRenderableWidget(Button.builder(Component.literal(T.t("■ Beenden")), b -> {
 				multimedia$replaceToken("\\s*(?i:tv:[A-Za-z0-9_]{3,16})", null);
-				de.schmodas.multimedia.TvSender.stopAll();
+				de.schmodas.multimedia.TvSender.stopScreen();
 				onDone();
 			}).bounds(this.width / 2 + 2, y, 98, 20).tooltip(Tooltip.create(Component.literal(
 					T.t("Hört auf zu senden. Die Leinwand ist dann wieder frei.")))).build());

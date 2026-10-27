@@ -34,10 +34,20 @@ public class MultiMediaClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry.addLast(
 				net.minecraft.resources.Identifier.fromNamespaceAndPath(MOD_ID, "sending"), (g, dt) -> {
 					TvSender s = TvSender.current();
+					int y = 6;
 					if (s != null && TvSender.isSending()) {
 						int n = s.viewerCount();
 						g.text(Minecraft.getInstance().font, T.t("● Du sendest") + (n > 0 ? " – " + n + (n == 1 ? T.t(" Zuschauer") : (T.german() ? " Zuschauer" : " viewers")) : ""),
-								6, 6, 0xFFFF5555, true);
+								6, y, 0xFFFF5555, true);
+						y += 11;
+					}
+					if (TvSender.isCamOn()) {
+						g.text(Minecraft.getInstance().font, "● Webcam on", 6, y, 0xFFFF5555, true);
+						y += 11;
+					}
+					String controllers = RemoteControl.activeSummary();
+					if (controllers != null) {
+						g.text(Minecraft.getInstance().font, "⚠ " + controllers + " can control your PC – /mm control off", 6, y, 0xFFFFAA00, true);
 					}
 				});
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, ctx) -> registerCommands(dispatcher));
@@ -49,6 +59,7 @@ public class MultiMediaClient implements ClientModInitializer {
 				RadioManager.stopAll(client);
 				JukeboxVisuals.clear(client);
 				ScreenManager.closeAll();
+				CamManager.closeAll();
 			});
 		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
@@ -65,8 +76,10 @@ public class MultiMediaClient implements ClientModInitializer {
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(JukeboxVisuals::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(ScreenManager::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(CamManager::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(LeanView::tick);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(ScreenManager::render);
+		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(CamManager::render);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(LeanRender::render);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(LeanHands::render);
 	}
@@ -154,7 +167,7 @@ public class MultiMediaClient implements ClientModInitializer {
 								status(T.t("Du sendest gerade nicht."));
 								return 1;
 							}
-							TvSender.stopAll();
+							TvSender.stopScreen();
 							status(T.t("Senden beendet."));
 							return 1;
 						}))
@@ -162,6 +175,58 @@ public class MultiMediaClient implements ClientModInitializer {
 							TvInvite.send(java.util.List.of(StringArgumentType.getString(c, "spieler")));
 							return 1;
 						}))))
+				.then(literal("cam")
+						.executes(c -> {
+							status(TvSender.isCamOn() ? "Webcam is on. /mm cam off to stop."
+									: "Webcam is off. /mm cam on to start (players you invited see it above your head).");
+							return 1;
+						})
+						.then(literal("on").executes(c -> camOn()))
+						.then(literal("off").executes(c -> {
+							TvSender.stopCam();
+							status("Webcam off.");
+							return 1;
+						}))
+						.then(literal("devices").executes(c -> {
+							Tools.ensure(MultiMediaClient::status).thenAccept(paths -> {
+								var list = TvSender.camDevices(paths);
+								Minecraft.getInstance().execute(() -> {
+									if (list.isEmpty()) {
+										error("No webcam found.");
+									} else {
+										status("Webcams (pick one with /mm cam use <name>):");
+										list.forEach(dev -> line(dev, dev.equals(Settings.camDevice()) ? "selected" : ""));
+									}
+								});
+							});
+							return 1;
+						}))
+						.then(literal("use").then(argument("device", StringArgumentType.greedyString()).executes(c -> {
+							Settings.setCamDevice(StringArgumentType.getString(c, "device").trim());
+							status("Webcam set to " + Settings.camDevice() + ".");
+							return TvSender.isCamOn() ? camOn() : 1;
+						}))))
+				.then(literal("control")
+						.executes(c -> {
+							String who = RemoteControl.activeSummary();
+							status(who == null ? "Nobody can control your PC." : who + " can control your PC. /mm control off revokes everyone.");
+							return 1;
+						})
+						.then(literal("allow").then(argument("spieler", StringArgumentType.word()).executes(c ->
+								RemoteControl.allow(StringArgumentType.getString(c, "spieler")) ? 1 : 0)))
+						.then(literal("deny").then(argument("spieler", StringArgumentType.word()).executes(c -> {
+							RemoteControl.deny(StringArgumentType.getString(c, "spieler"));
+							return 1;
+						})))
+						.then(literal("revoke").then(argument("spieler", StringArgumentType.word()).executes(c -> {
+							RemoteControl.revoke(StringArgumentType.getString(c, "spieler"));
+							return 1;
+						})))
+						.then(literal("off").executes(c -> {
+							RemoteControl.stopAll();
+							status("Remote control off – nobody can control your PC.");
+							return 1;
+						})))
 				.then(literal("titel")
 						.executes(c -> {
 							status(T.t("Titel über der Jukebox: ") + (Settings.hideTitles() ? T.t("aus") : T.t("an")) + T.t(". Ändern mit /disc titel an|aus."));
@@ -222,6 +287,32 @@ public class MultiMediaClient implements ClientModInitializer {
 		// Kurzformen für den neuen Namen
 		d.register(literal("mm").executes(MultiMediaClient::help).redirect(root));
 		d.register(literal("multimedia").executes(MultiMediaClient::help).redirect(root));
+	}
+
+	/** Starts the webcam and re-sends invites to the invited players who are online. */
+	private static int camOn() {
+		status("Starting webcam …");
+		TvSender.startCam(Settings.camDevice(), MultiMediaClient::status, () -> {
+			status("Webcam on. Players you've invited (/mm tv invite <player>) see it above your head.");
+			Minecraft.getInstance().execute(() -> {
+				var conn = Minecraft.getInstance().getConnection();
+				if (conn == null) {
+					return;
+				}
+				java.util.Set<String> online = new java.util.HashSet<>();
+				conn.getOnlinePlayers().forEach(p -> online.add(p.getProfile().name()));
+				java.util.List<String> invite = new java.util.ArrayList<>();
+				for (String name : Settings.tvInvited()) {
+					if (online.contains(name)) {
+						invite.add(name);
+					}
+				}
+				if (!invite.isEmpty()) {
+					TvInvite.send(invite);
+				}
+			});
+		});
+		return 1;
 	}
 
 	/** Zweiter Name für einen Unterbefehl (gleiche Wirkung, gleiche Argumente). */
@@ -286,6 +377,9 @@ public class MultiMediaClient implements ClientModInitializer {
 		line(T.t("/disc titel an | aus"), T.t("Songtitel über der Jukebox zeigen oder ausblenden"));
 		line(T.t("/disc aus | an"), T.t("MultiMedia für dich aus- oder einschalten"));
 		line(T.t("/disc update"), T.t("yt-dlp aktualisieren, falls YouTube streikt"));
+		line("/mm cam on | off", "webcam above your head for players you invited (/mm cam devices to pick one)");
+		line("Right-click a screen", "touch screen: video controls, or control a friend's PC if they allow it");
+		line("/mm control off", "stop everyone from controlling your PC");
 		return 1;
 	}
 

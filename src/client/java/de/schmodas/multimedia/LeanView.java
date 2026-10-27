@@ -342,6 +342,14 @@ public final class LeanView {
 		if (sign == null) {
 			return;
 		}
+		signActionAt(mc, sign, action);
+	}
+
+	/** Same as signAction, for a sign given directly (e.g. a screen sign, from the touch screen). */
+	public static void signActionAt(Minecraft mc, BlockPos sign, String action) {
+		if (mc.level == null || mc.player == null || sign == null) {
+			return;
+		}
 		pendingSignAction = action;
 		pendingSignPos = sign;
 		// Farbstoff/Leuchttinte/Honigwabe in der Hand würden das Schild färben bzw. wachsen – kurz eine andere Hand nehmen

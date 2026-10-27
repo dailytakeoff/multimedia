@@ -4,6 +4,10 @@ A client-side Fabric mod for Minecraft 26.3 that plays YouTube on jukeboxes and 
 
 Download: [Modrinth](https://modrinth.com/mod/multimedia-cinema)
 
+> **This fork** adds StreamCraft-style features, free: webcams above players' heads, screen sharing from Linux
+> (Wayland and X11) as well as Windows, and a touch screen with video controls and remote control of a friend's
+> shared PC. See [Fork additions](#fork-additions).
+
 ## Features
 
 - **Jukebox + disc + sign with a YouTube link** = music for everyone with the mod, at the same position in the song.
@@ -17,10 +21,28 @@ Download: [Modrinth](https://modrinth.com/mod/multimedia-cinema)
 
 Client-side only: the server doesn't need the mod, and players without it simply hear nothing.
 
+## Fork additions
+
+- **Webcam above your head:** `/mm cam on` (and `/mm cam off`). Players you've invited with `/mm tv invite <player>`
+  see it as a small full-bright screen above your name tag when they're within 40 blocks. `/mm cam devices` lists
+  webcams, `/mm cam use <name>` picks one. Windows uses DirectShow, Linux uses `/dev/videoN` (V4L2).
+- **Linux screen sharing:** tried in this order, whatever is installed is used:
+  ffmpeg's `pipewiregrab` (if your ffmpeg has it), `wf-recorder` (Hyprland, Sway, Niri and other wlroots desktops),
+  `gpu-screen-recorder` (any Wayland desktop, via the screen-share portal), then X11 `x11grab`.
+  Sound is the whole PC (PulseAudio/PipeWire monitor). On Arch/CachyOS: `sudo pacman -S ffmpeg yt-dlp deno wf-recorder`.
+- **Touch screen:** right-click a screen (sneak to place blocks as usual).
+  - YouTube screens: tap to pause/play, buttons for previous/next track and restart – for everyone, like the sign.
+  - A friend's shared screen: **Request control**. They get *[Allow] / [Deny]* in chat. Once allowed, your clicks,
+	scrolling and typing on the picture go to their PC. They see a warning on their HUD the whole time and can stop
+	it with `/mm control revoke <player>` or `/mm control off`; stopping the share revokes everyone. Permission is
+	never saved.
+  - Remote control replays input with `mminput.exe` on Windows (built from `native/mminput.cpp`), and with
+	`ydotool` (Wayland, needs `ydotoold` running: `systemctl --user enable --now ydotool`) or `xdotool` (X11) on Linux.
+
 ## Requirements
 
 - Minecraft 26.3, Fabric Loader, Fabric API, Java 25
-- Windows for screen streaming. On first use the mod downloads [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://github.com/yt-dlp/FFmpeg-Builds) and [Deno](https://github.com/denoland/deno) from their official GitHub releases.
+- Screen streaming: Windows, or Linux with one of the capture tools above. On Windows, on first use the mod downloads [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://github.com/yt-dlp/FFmpeg-Builds) and [Deno](https://github.com/denoland/deno) from their official GitHub releases.
 
 ## Commands
 
@@ -29,7 +51,7 @@ Client-side only: the server doesn't need the mod, and players without it simply
 ## Building
 
 ```
-./scripts/build-audio-helper.sh   # Windows audio helper from native/mmaudio.cpp (needs MinGW-w64)
+./scripts/build-audio-helper.sh   # Windows audio + remote-control helpers from native/ (needs MinGW-w64)
 ./gradlew build
 ```
 

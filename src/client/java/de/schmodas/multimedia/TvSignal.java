@@ -20,9 +20,10 @@ import java.util.regex.Pattern;
  * "so erreichst du mich" (oder "sende gerade nicht"). Danach bohren beide das Loch (siehe P2p).
  */
 final class TvSignal {
-	private static final Pattern REQUEST = Pattern.compile("mmtvq1:([A-Za-z0-9_-]{10,})");
-	private static final Pattern ANSWER = Pattern.compile("mmtva1:([A-Za-z0-9_-]{10,})");
-	private static final Pattern ANY = Pattern.compile("mmtv[qa]1:");
+	// "mmtv…" = screen share, "mmcm…" = webcam (same protocol, second sender)
+	private static final Pattern REQUEST = Pattern.compile("mm(tv|cm)q1:([A-Za-z0-9_-]{10,})");
+	private static final Pattern ANSWER = Pattern.compile("mm(tv|cm)a1:([A-Za-z0-9_-]{10,})");
+	private static final Pattern ANY = Pattern.compile("mm(tv|cm)[qa]1:");
 	/** Nur für den Selbsttest: Nachrichten nicht verschicken, sondern direkt hier zustellen. */
 	static final boolean LOOPBACK = System.getProperty("multimedia.p2ploop") != null;
 
@@ -65,11 +66,15 @@ final class TvSignal {
 
 	/** Anfrage an den Sender schicken; die Antwort kommt über das Future. */
 	static CompletableFuture<Answer> request(String sender, String token, long session, List<InetSocketAddress> candidates) {
+		return request(sender, token, session, candidates, false);
+	}
+
+	static CompletableFuture<Answer> request(String sender, String token, long session, List<InetSocketAddress> candidates, boolean cam) {
 		CompletableFuture<Answer> f = new CompletableFuture<>();
 		PENDING.put(session, f);
 		f.whenComplete((a, e) -> PENDING.remove(session));
 		String me = Minecraft.getInstance().getUser().getName();
-		send(sender, "mmtvq1:" + b64(me + "|" + token + "|" + Long.toHexString(session) + "|" + join(candidates)));
+		send(sender, (cam ? "mmcmq1:" : "mmtvq1:") + b64(me + "|" + token + "|" + Long.toHexString(session) + "|" + join(candidates)));
 		return f;
 	}
 
@@ -77,8 +82,12 @@ final class TvSignal {
 
 	/** Antwort an einen Zuschauer (status: ok, off, bad; session 0 + "on" = "ich sende jetzt"). */
 	static void answer(String viewer, long session, String status, List<InetSocketAddress> candidates) {
+		answer(viewer, session, status, candidates, false);
+	}
+
+	static void answer(String viewer, long session, String status, List<InetSocketAddress> candidates, boolean cam) {
 		String me = Minecraft.getInstance().getUser().getName();
-		send(viewer, "mmtva1:" + b64(me + "|" + Long.toHexString(session) + "|" + status + "|" + join(candidates)));
+		send(viewer, (cam ? "mmcma1:" : "mmtva1:") + b64(me + "|" + Long.toHexString(session) + "|" + status + "|" + join(candidates)));
 	}
 
 	// ------------------------------------------------------------------ Empfang
@@ -86,7 +95,8 @@ final class TvSignal {
 	private static void handle(String text, String chatSender) {
 		Matcher q = REQUEST.matcher(text);
 		if (q.find()) {
-			String[] p = unb64(q.group(1));
+			boolean cam = q.group(1).equals("cm");
+			String[] p = unb64(q.group(2));
 			if (p == null || p.length < 3 || !p[0].matches("[A-Za-z0-9_]{3,16}") || !p[1].matches("[0-9a-f]{16,64}")) {
 				return;
 			}
@@ -101,14 +111,15 @@ final class TvSignal {
 			}
 			List<InetSocketAddress> cands = candidates(p.length > 3 ? p[3] : "");
 			String viewer = p[0];
-			Thread t = new Thread(() -> TvSender.handleRequest(viewer, p[1], session, cands), "MultiMedia-TvRequest");
+			Thread t = new Thread(() -> TvSender.handleRequest(viewer, p[1], session, cands, cam), "MultiMedia-TvRequest");
 			t.setDaemon(true);
 			t.start();
 			return;
 		}
 		Matcher a = ANSWER.matcher(text);
 		if (a.find()) {
-			String[] p = unb64(a.group(1));
+			boolean cam = a.group(1).equals("cm");
+			String[] p = unb64(a.group(2));
 			if (p == null || p.length < 3 || !p[0].matches("[A-Za-z0-9_]{3,16}")) {
 				return;
 			}
@@ -123,7 +134,7 @@ final class TvSignal {
 			}
 			Answer ans = new Answer(p[0], p[2], candidates(p.length > 3 ? p[3] : ""));
 			if (session == 0 && ans.status().equals("on")) {
-				LiveFeed.wake(p[0]);
+				LiveFeed.wake(p[0], cam);
 				return;
 			}
 			CompletableFuture<Answer> f = PENDING.get(session);

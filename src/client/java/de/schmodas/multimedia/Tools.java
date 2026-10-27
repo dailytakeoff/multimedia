@@ -216,6 +216,29 @@ public final class Tools {
 		}
 	}
 
+	/** Remote-control helper (Windows only, bundled like the audio helper): unpack when needed. Null if not available. */
+	static synchronized Path inputHelper() {
+		if (!WINDOWS) {
+			return null;
+		}
+		try (InputStream in = Tools.class.getResourceAsStream("/multimedia/mminput.exe")) {
+			if (in == null) {
+				return null;
+			}
+			byte[] data = in.readAllBytes();
+			Path target = BIN.resolve("mminput.exe");
+			if (!Files.exists(target) || Files.size(target) != data.length
+					|| !java.util.Arrays.equals(Files.readAllBytes(target), data)) {
+				Files.createDirectories(BIN);
+				Files.write(target, data);
+			}
+			return target;
+		} catch (IOException e) {
+			MultiMediaClient.LOGGER.warn("Fernsteuerungs-Helfer konnte nicht entpackt werden: {}", e.toString());
+			return null;
+		}
+	}
+
 	/** Ton-Helfer fürs Senden (nur Windows, steckt in der Mod): bei Bedarf entpacken. Null, wenn nicht verfügbar. */
 	static synchronized Path audioHelper() {
 		if (!WINDOWS) {

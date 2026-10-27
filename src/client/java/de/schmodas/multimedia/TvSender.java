@@ -38,6 +38,16 @@ public final class TvSender {
 	private static final int VIEWER_QUEUE = 512;
 
 	private static volatile TvSender current;
+	/** Webcam: runs alongside the screen share, as a second sender on its own port (see CamManager). */
+	private static volatile TvSender camCurrent;
+
+	/** true: this sender streams the webcam instead of a monitor. */
+	private final boolean cam;
+	/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
+	private volatile String camDevice;
+	/** Size of the captured picture before scaling (for remote control); 0 = unknown. */
+	volatile int sourceWidth;
+	volatile int sourceHeight;
 
 	private volatile int monitor;
 	private volatile String sound;
@@ -60,6 +70,11 @@ public final class TvSender {
 	private final Map<Long, UdpViewer> udpViewers = new ConcurrentHashMap<>();
 	/** Zuschauer, die gefragt haben, während nicht gesendet wurde – bekommen beim Start Bescheid. */
 	private static final Set<String> WAITING = ConcurrentHashMap.newKeySet();
+	private static final Set<String> CAM_WAITING = ConcurrentHashMap.newKeySet();
+
+	private Set<String> waiting() {
+		return cam ? CAM_WAITING : WAITING;
+	}
 	/** Die letzten Pakete (zum Nachsenden), Nummer = seq. */
 	private static final int RING = 8192;
 	private final byte[][] ring = new byte[RING][];
@@ -69,8 +84,17 @@ public final class TvSender {
 	private static final double MAX_UPLOAD = 13_000_000 / 8.0;
 
 	private TvSender(int monitor, String sound) {
+		this(monitor, sound, false, null);
+	}
+
+	private TvSender(int monitor, String sound, boolean cam, String camDevice) {
 		this.monitor = monitor;
 		this.sound = sound;
+		this.cam = cam;
+		this.camDevice = camDevice;
+		if (cam) {
+			this.bitrateK = 800;
+		}
 	}
 
 	public static boolean isSending() {
@@ -79,6 +103,71 @@ public final class TvSender {
 
 	public static TvSender current() {
 		return current;
+	}
+
+	public boolean isCam() {
+		return cam;
+	}
+
+	// ------------------------------------------------------------------ Webcam
+
+	public static boolean isCamOn() {
+		return camCurrent != null && !camCurrent.stopped;
+	}
+
+	/** Starts the webcam stream (or restarts it with another device). */
+	public static synchronized void startCam(String device, Consumer<String> status, Runnable onReady) {
+		if (isCamOn()) {
+			camCurrent.stop();
+		}
+		TvSender s = new TvSender(0, "off", true, device);
+		camCurrent = s;
+		Thread t = new Thread(() -> s.run(status, onReady), "MultiMedia-CamSend");
+		t.setDaemon(true);
+		t.start();
+	}
+
+	public static synchronized void stopCam() {
+		if (camCurrent != null) {
+			camCurrent.stop();
+			camCurrent = null;
+		}
+	}
+
+	/** Stops only the screen share (the webcam keeps running). */
+	public static synchronized void stopScreen() {
+		if (current != null) {
+			current.stop();
+			current = null;
+		}
+	}
+
+	/** Webcams on this PC: Windows by dshow name, Linux as /dev/videoN. */
+	public static List<String> camDevices(Tools.Paths paths) {
+		List<String> out = new ArrayList<>();
+		if (WINDOWS) {
+			try {
+				Process p = new ProcessBuilder(paths.ffmpeg(), "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+						.redirectErrorStream(true).start();
+				String text = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+				p.waitFor(10, TimeUnit.SECONDS);
+				java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"([^\"]+)\"\\s*\\(video\\)").matcher(text);
+				while (m.find()) {
+					if (!out.contains(m.group(1))) {
+						out.add(m.group(1));
+					}
+				}
+			} catch (Exception e) {
+				MultiMediaClient.LOGGER.info("Webcam list failed: {}", e.toString());
+			}
+		} else {
+			for (int i = 0; i < 10; i++) {
+				if (java.nio.file.Files.exists(java.nio.file.Path.of("/dev/video" + i))) {
+					out.add("/dev/video" + i);
+				}
+			}
+		}
+		return out;
 	}
 
 	/** Zuschauer (ohne einen selbst). */
@@ -95,6 +184,10 @@ public final class TvSender {
 			}
 		}
 		return n;
+	}
+
+	int monitor() {
+		return monitor;
 	}
 
 	public String encoderName() {
@@ -134,6 +227,9 @@ public final class TvSender {
 
 	/** Passt die Bildqualität an die Zahl der Zuschauer an (runter sofort nach 5 s, wieder rauf erst nach 30 s). */
 	private void qualityLoop() {
+		if (cam) {
+			return; // webcam: fixed small bitrate
+		}
 		long wantSince = 0;
 		int lastWant = bitrateK;
 		while (!stopped) {
@@ -183,11 +279,13 @@ public final class TvSender {
 		return true;
 	}
 
+	/** Stops everything (screen share and webcam), e.g. when leaving the server. */
 	public static synchronized void stopAll() {
 		if (current != null) {
 			current.stop();
 			current = null;
 		}
+		stopCam();
 	}
 
 	// ------------------------------------------------------------------ Ablauf
@@ -195,7 +293,7 @@ public final class TvSender {
 	private void run(Consumer<String> status, Runnable onReady) {
 		try {
 			Tools.Paths paths = Tools.ensure(status).get();
-			int port = Settings.tvPort();
+			int port = cam ? Settings.tvPort() + 1 : Settings.tvPort();
 			server = new ServerSocket();
 			server.setReuseAddress(true);
 			server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 16); // nur für die eigene Leinwand
@@ -251,11 +349,11 @@ public final class TvSender {
 						}
 						onReady.run();
 						// wer vorhin gefragt hat, bekommt Bescheid, dass es losgeht
-						for (String w : WAITING) {
-							TvSignal.answer(w, 0, "on", List.of());
+						for (String w : waiting()) {
+							TvSignal.answer(w, 0, "on", List.of(), cam);
 						}
-						WAITING.clear();
-					} else if (changeStatus != null) {
+						waiting().clear();
+					} else if (changeStatus != null && !cam) {
 						changeStatus.accept(T.t("Du sendest jetzt Monitor ") + (monitor + 1) + " (" + encoderName + ", " + soundInfo + ").");
 						changeStatus = null;
 					}
@@ -286,8 +384,13 @@ public final class TvSender {
 			}
 			if (!stopped) {
 				MultiMediaClient.LOGGER.warn("Senden: Aufnahme beendet ({})", lastError);
-				status.accept(ready ? T.t("Senden beendet: Aufnahme ist abgebrochen (") + lastError + ")"
-						: T.t("Bildschirm-Aufnahme ging nicht: ") + lastError);
+				if (cam) {
+					status.accept(ready ? "Webcam stopped: capture ended (" + lastError + ")"
+							: "Webcam didn't start: " + lastError);
+				} else {
+					status.accept(ready ? T.t("Senden beendet: Aufnahme ist abgebrochen (") + lastError + ")"
+							: T.t("Bildschirm-Aufnahme ging nicht: ") + lastError + (WINDOWS ? "" : LINUX_HINT));
+				}
 				stop();
 			}
 		} catch (Exception e) {
@@ -299,7 +402,15 @@ public final class TvSender {
 		}
 	}
 
-	private record Variant(String name, List<String> input, List<String> output) {
+	/**
+	 * One way of capturing. pre: an extra program whose output (any container ffmpeg understands) is piped into
+	 * ffmpeg's stdin – used on Wayland, where ffmpeg can't grab the screen by itself. waitMs: how long to wait for
+	 * the first data (longer when the system shows a "which screen?" dialog first).
+	 */
+	private record Variant(String name, List<String> input, List<String> output, List<String> pre, String preStdin, long waitMs) {
+		Variant(String name, List<String> input, List<String> output) {
+			this(name, input, output, null, null, 6000);
+		}
 	}
 
 	private volatile String lastError = "unbekannt";
@@ -309,6 +420,9 @@ public final class TvSender {
 		return soundInfo;
 	}
 
+	static final String LINUX_HINT = " – on Linux install wf-recorder (Hyprland/Niri/Sway), gpu-screen-recorder (any Wayland desktop)"
+			+ " or use an X11 session. Check latest.log for details.";
+
 	/** Aufnahme-Varianten, beste zuerst. */
 	private List<Variant> variants() {
 		String bitrate = bitrateK + "k";
@@ -317,6 +431,9 @@ public final class TvSender {
 				"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
 		List<String> x264 = List.of("-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-b:v", bitrate,
 				"-maxrate", bitrate, "-bufsize", bufsize, "-g", "60", "-bf", "0", "-pix_fmt", "yuv420p");
+		if (cam) {
+			return camVariants(x264);
+		}
 		List<Variant> out = new ArrayList<>();
 		if (WINDOWS) {
 			List<String> dda = List.of("-f", "lavfi", "-i", "ddagrab=output_idx=" + monitor + ":framerate=30:draw_mouse=0");
@@ -332,11 +449,104 @@ public final class TvSender {
 			out.add(new Variant("Prozessor, ganzer Desktop", List.of("-f", "gdigrab", "-framerate", "30", "-i", "desktop"),
 					concat(List.of("-vf", SCALE), x264)));
 		} else {
-			// Test (Linux): Testbild statt Monitor, weißer Blitz jede Sekunde (dazu ein Piep im Ton)
-			out.add(new Variant("Testbild", List.of("-re", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30"),
-					concat(List.of("-vf", "drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(t,3),0.1)'"), x264)));
+			out.addAll(linuxVariants(x264));
 		}
 		return out;
+	}
+
+	/**
+	 * Linux: Wayland doesn't let programs simply read the screen, so the capture goes through a helper that asks
+	 * the desktop (PipeWire portal or wlroots screencopy). X11 can be grabbed directly. Every option that isn't
+	 * installed or doesn't work is skipped automatically (see run()).
+	 */
+	private List<Variant> linuxVariants(List<String> x264) {
+		List<Variant> out = new ArrayList<>();
+		List<String> fromPipe = List.of("-fflags", "nobuffer", "-thread_queue_size", "512", "-i", "pipe:0");
+		List<String> scaled = concat(List.of("-vf", SCALE), x264);
+		boolean wayland = System.getenv("WAYLAND_DISPLAY") != null
+				|| "wayland".equalsIgnoreCase(System.getenv("XDG_SESSION_TYPE"));
+		String display = System.getenv("DISPLAY");
+		if (wayland) {
+			if (ffmpegHasFilter("pipewiregrab")) {
+				out.add(new Variant("PipeWire (ffmpeg)", List.of("-f", "lavfi", "-i", "pipewiregrab=framerate=30"), scaled,
+						null, null, 60_000));
+			}
+			if (onPath("wf-recorder")) {
+				// wlroots desktops (Hyprland, Sway, Niri …). With several monitors it asks which one on stdin -> answer it.
+				List<String> wf = List.of("wf-recorder", "-y", "-r", "30", "-c", "libx264", "-p", "preset=ultrafast",
+						"-p", "tune=zerolatency", "-m", "matroska", "-f", "/dev/stdout");
+				out.add(new Variant("wf-recorder", fromPipe, scaled, wf, (monitor + 1) + "\n", 15_000));
+			}
+			if (onPath("gpu-screen-recorder")) {
+				// works on every Wayland desktop through the screen-share portal (the desktop asks which screen)
+				List<String> gsr = List.of("gpu-screen-recorder", "-w", "portal", "-f", "30", "-k", "h264", "-c", "mkv",
+						"-o", "/dev/stdout");
+				out.add(new Variant("gpu-screen-recorder", fromPipe, scaled, gsr, null, 60_000));
+			}
+		}
+		if (display != null && !display.isBlank()) {
+			// X11 (on Wayland this only sees X11 windows via XWayland, so it comes last)
+			out.add(new Variant("X11", List.of("-f", "x11grab", "-framerate", "30", "-draw_mouse", "1", "-i", display), scaled));
+		}
+		return out;
+	}
+
+	/** Webcam: cropped to 16:9 and small, it's only shown above the player's head. */
+	private List<Variant> camVariants(List<String> x264) {
+		List<String> vf = List.of("-vf", "crop='min(iw,ih*16/9)':'min(ih,iw*9/16)',scale=640:360,setsar=1");
+		List<String> devices = new ArrayList<>();
+		if (camDevice != null && !camDevice.isBlank()) {
+			devices.add(camDevice);
+		}
+		List<Variant> out = new ArrayList<>();
+		if (WINDOWS) {
+			if (devices.isEmpty()) {
+				try {
+					devices.addAll(camDevices(Tools.ensure(s -> { }).get()));
+				} catch (Exception ignored) {
+				}
+			}
+			for (String d : devices) {
+				out.add(new Variant("Webcam " + d, List.of("-f", "dshow", "-rtbufsize", "64M", "-i", "video=" + d), concat(vf, x264)));
+			}
+		} else {
+			if (devices.isEmpty()) {
+				devices.addAll(camDevices(null));
+			}
+			for (String d : devices) {
+				// metadata nodes (/dev/video1 next to /dev/video0) fail right away and are skipped
+				out.add(new Variant("Webcam " + d, List.of("-f", "v4l2", "-framerate", "30", "-i", d), concat(vf, x264)));
+			}
+		}
+		return out;
+	}
+
+	private static final Map<String, Boolean> FILTER_CACHE = new ConcurrentHashMap<>();
+
+	private static boolean ffmpegHasFilter(String name) {
+		return FILTER_CACHE.computeIfAbsent(name, n -> {
+			try {
+				Process p = new ProcessBuilder("ffmpeg", "-hide_banner", "-h", "filter=" + n).redirectErrorStream(true).start();
+				String text = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+				p.waitFor(5, TimeUnit.SECONDS);
+				return text.contains("Filter " + n);
+			} catch (Exception e) {
+				return false;
+			}
+		});
+	}
+
+	static boolean onPath(String program) {
+		String path = System.getenv("PATH");
+		if (path == null) {
+			return false;
+		}
+		for (String dir : path.split(java.io.File.pathSeparator)) {
+			if (!dir.isEmpty() && java.nio.file.Files.isExecutable(java.nio.file.Path.of(dir, program))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static List<String> concat(List<String> a, List<String> b) {
@@ -350,21 +560,27 @@ public final class TvSender {
 		if (helper != null) {
 			return List.of("-f", "s16le", "-ar", "48000", "-ac", "2", "-i", "pipe:0");
 		}
-		if (!WINDOWS && !sound.equals("off")) {
-			return List.of("-re", "-f", "lavfi", "-i", "aevalsrc='if(lt(mod(t,3),0.1),0.4*sin(2*PI*880*t),0)':s=48000:c=stereo");
+		if (!WINDOWS && !cam && !sound.equals("off")) {
+			// Linux: everything the PC plays (PulseAudio / PipeWire-Pulse), Minecraft included
+			return List.of("-f", "pulse", "-thread_queue_size", "512", "-sample_rate", "48000", "-channels", "2",
+					"-i", "@DEFAULT_MONITOR@");
 		}
 		return List.of("-re", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
 	}
 
 	/** Befehl für den Ton-Helfer, oder null (Ton aus / nicht Windows / Helfer fehlt). */
 	private List<String> helperCommand() {
-		if (sound.equals("off")) {
-			soundInfo = "ohne Ton";
+		if (cam || sound.equals("off")) {
+			soundInfo = cam ? "no sound" : "ohne Ton";
+			return null;
+		}
+		if (!WINDOWS) {
+			soundInfo = "sound: whole PC";
 			return null;
 		}
 		java.nio.file.Path helper = Tools.audioHelper();
 		if (helper == null) {
-			soundInfo = WINDOWS ? T.t("ohne Ton (Ton-Helfer fehlt)") : T.t("Test-Piep");
+			soundInfo = T.t("ohne Ton (Ton-Helfer fehlt)");
 			return null;
 		}
 		String self = Long.toString(ProcessHandle.current().pid());
@@ -380,28 +596,51 @@ public final class TvSender {
 		return List.of(helper.toString(), "all", self);
 	}
 
-	/** Startet ffmpeg (mit Ton-Helfer davor); true, wenn innerhalb von 6 s Daten kommen. */
+	/** Startet ffmpeg (mit Ton-Helfer bzw. Bild-Helfer davor); true, wenn rechtzeitig Daten kommen. */
 	private boolean startEncoder(Tools.Paths paths, Variant v) throws IOException, InterruptedException {
-		List<String> helper = helperCommand();
-		List<String> cmd = new ArrayList<>(List.of(paths.ffmpeg(), "-hide_banner", "-loglevel", "error"));
+		List<String> helper = v.pre != null ? null : helperCommand();
+		if (v.pre != null) {
+			helperCommand(); // only sets soundInfo (Linux: sound comes from PulseAudio, not stdin)
+		}
+		List<String> front = v.pre != null ? v.pre : helper;
+		List<String> cmd = new ArrayList<>(List.of(paths.ffmpeg(), "-hide_banner", "-loglevel", WINDOWS ? "error" : "info", "-nostats"));
+		if (front == null) {
+			cmd.add("-nostdin");
+		}
 		cmd.addAll(v.input);
 		cmd.addAll(audioInput(helper));
 		cmd.addAll(List.of("-map", "0:v:0", "-map", "1:a:0"));
 		cmd.addAll(v.output);
 		cmd.addAll(List.of("-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-max_interleave_delta", "500000",
 				"-f", "mpegts", "-muxdelay", "0", "-flush_packets", "1", "pipe:1"));
+		sourceWidth = 0;
+		sourceHeight = 0;
 		List<Process> started;
-		if (helper != null) {
-			started = ProcessBuilder.startPipeline(List.of(new ProcessBuilder(helper), new ProcessBuilder(cmd)));
-			logErrors(started.get(0), "ton");
-		} else {
-			started = List.of(new ProcessBuilder(cmd).start());
+		try {
+			if (front != null) {
+				started = ProcessBuilder.startPipeline(List.of(new ProcessBuilder(front), new ProcessBuilder(cmd)));
+				logErrors(started.get(0), v.pre != null ? "bild" : "ton");
+				OutputStream first = started.get(0).getOutputStream();
+				try {
+					if (v.preStdin != null) {
+						first.write(v.preStdin.getBytes(StandardCharsets.UTF_8));
+						first.flush();
+					}
+				} catch (IOException ignored) {
+				}
+			} else {
+				started = List.of(new ProcessBuilder(cmd).start());
+			}
+		} catch (IOException e) {
+			lastError = e.getMessage(); // z. B. Programm nicht installiert
+			MultiMediaClient.LOGGER.info("Senden: Variante '{}' ging nicht: {}", v.name, lastError);
+			return false;
 		}
 		Process p = started.get(started.size() - 1);
 		logErrors(p, v.name);
 		// auf erste Daten warten
 		InputStream in = p.getInputStream();
-		long deadline = System.currentTimeMillis() + 6000;
+		long deadline = System.currentTimeMillis() + v.waitMs;
 		while (System.currentTimeMillis() < deadline && !stopped) {
 			if (in.available() > 0) {
 				ffmpeg = p;
@@ -419,16 +658,31 @@ public final class TvSender {
 		return false;
 	}
 
+	/** "Stream #0:0…: Video: … 2560x1440" – the first video input is the capture. */
+	private static final java.util.regex.Pattern SOURCE_SIZE =
+			java.util.regex.Pattern.compile("Stream #0:0.*Video:.*?\\b(\\d{2,5})x(\\d{2,5})\\b");
+	private static final java.util.regex.Pattern ERRORISH =
+			java.util.regex.Pattern.compile("(?i)error|fail|invalid|denied|cannot|could not|couldn't|no such|unable|not found|refused");
+
 	private void logErrors(Process p, String tag) {
 		Thread err = new Thread(() -> {
 			try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
 				String line;
 				while ((line = r.readLine()) != null) {
 					if (!line.isBlank()) {
-						if (!tag.equals("ton")) {
-							lastError = line.trim();
+						String t = line.trim();
+						if (sourceWidth == 0) {
+							java.util.regex.Matcher m = SOURCE_SIZE.matcher(t);
+							if (m.find()) {
+								sourceWidth = Integer.parseInt(m.group(1));
+								sourceHeight = Integer.parseInt(m.group(2));
+							}
 						}
-						MultiMediaClient.LOGGER.info("[senden/{}] {}", tag, line.trim());
+						// Windows: ffmpeg only prints errors; Linux: also info lines (for the size), so pick the errors
+						if (!tag.equals("ton") && (WINDOWS || ERRORISH.matcher(t).find())) {
+							lastError = t;
+						}
+						MultiMediaClient.LOGGER.info("[senden/{}] {}", tag, t);
 					}
 				}
 			} catch (IOException ignored) {
@@ -442,7 +696,7 @@ public final class TvSender {
 	public static List<String> audioPrograms() {
 		java.nio.file.Path helper = Tools.audioHelper();
 		if (helper == null) {
-			return WINDOWS ? List.of() : List.of("Discord.exe", "Spotify.exe", "chrome.exe"); // Linux: nur zum Testen des Menüs
+			return List.of(); // Linux: no per-program sound, the whole PC is sent
 		}
 		try {
 			Process p = new ProcessBuilder(helper.toString(), "list", Long.toString(ProcessHandle.current().pid())).start();
@@ -574,6 +828,9 @@ public final class TvSender {
 		synchronized (newData) {
 			newData.notifyAll();
 		}
+		if (!cam) {
+			RemoteControl.stopAll();
+		}
 		MultiMediaClient.LOGGER.info("Senden beendet");
 	}
 
@@ -598,18 +855,22 @@ public final class TvSender {
 
 	/** Anfrage eines Freundes (kam über den Chat, siehe TvSignal). */
 	static void handleRequest(String viewer, String token, long session, List<InetSocketAddress> candidates) {
+		handleRequest(viewer, token, session, candidates, false);
+	}
+
+	static void handleRequest(String viewer, String token, long session, List<InetSocketAddress> candidates, boolean cam) {
 		if (!TvSignal.LOOPBACK && viewer.equalsIgnoreCase(net.minecraft.client.Minecraft.getInstance().getUser().getName())) {
 			return;
 		}
 		if (!MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), Settings.tvToken().getBytes(StandardCharsets.UTF_8))) {
 			MultiMediaClient.LOGGER.info("Senden: Anfrage von {} mit alter/falscher Einladung", viewer);
-			TvSignal.answer(viewer, session, "bad", List.of());
+			TvSignal.answer(viewer, session, "bad", List.of(), cam);
 			return;
 		}
-		TvSender s = current;
+		TvSender s = cam ? camCurrent : current;
 		if (s == null || s.stopped || s.udp == null) {
-			WAITING.add(viewer);
-			TvSignal.answer(viewer, session, "off", List.of());
+			(cam ? CAM_WAITING : WAITING).add(viewer);
+			TvSignal.answer(viewer, session, "off", List.of(), cam);
 			return;
 		}
 		s.accept(viewer, session, candidates);
@@ -625,7 +886,7 @@ public final class TvSender {
 			mine.add(r.mapped());
 		}
 		mine.addAll(P2p.localCandidates(udp.port()));
-		TvSignal.answer(viewer, session, "ok", mine);
+		TvSignal.answer(viewer, session, "ok", mine, cam);
 		MultiMediaClient.LOGGER.info("Senden: {} möchte zuschauen – bohre Loch (meine Adressen {}, seine {})", viewer, mine.size(), candidates.size());
 		// eine Weile an alle bekannten Adressen klopfen, bis eine antwortet
 		Thread t = new Thread(() -> {
@@ -674,6 +935,21 @@ public final class TvSender {
 			case P2p.BYE -> {
 				udpViewers.remove(v.session);
 				MultiMediaClient.LOGGER.info("Senden: {} schaut nicht mehr zu, jetzt {}", v.name, viewerCount());
+			}
+			case P2p.INPUT -> {
+				// touch / remote control from a viewer (only for the screen share, never the webcam)
+				if (!cam && d.length > P2p.HEADER) {
+					String event = new String(d, P2p.HEADER, d.length - P2p.HEADER, StandardCharsets.UTF_8);
+					RemoteControl.onEvent(this, v.name, event, reply -> {
+						byte[] text = reply.getBytes(StandardCharsets.UTF_8);
+						byte[] pkt = P2p.packet(P2p.CONTROL, v.session, text.length);
+						System.arraycopy(text, 0, pkt, P2p.HEADER, text.length);
+						InetSocketAddress to = v.addr;
+						if (to != null && !stopped) {
+							udp.send(pkt, to);
+						}
+					});
+				}
 			}
 			default -> {
 			}
@@ -792,10 +1068,12 @@ public final class TvSender {
 				cmd.addAll(List.of("-f", "lavfi", "-i", "ddagrab=output_idx=" + i + ":framerate=5:draw_mouse=0",
 						"-vf", "hwdownload,format=bgra,scale=256:144:force_original_aspect_ratio=decrease,pad=256:144:(ow-iw)/2:(oh-ih)/2"));
 			} else {
-				if (i >= 2) {
+				// Linux: no live previews – on Wayland every grab would pop up the screen-share dialog.
+				// One neutral tile; the desktop (or wf-recorder) asks which monitor when sending starts.
+				if (i >= 1) {
 					break;
 				}
-				cmd.addAll(List.of("-f", "lavfi", "-i", (i == 0 ? "testsrc2" : "mandelbrot") + "=size=256x144:rate=5"));
+				cmd.addAll(List.of("-f", "lavfi", "-i", "color=c=0x1d2733:s=256x144:r=5"));
 			}
 			cmd.addAll(List.of("-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"));
 			try {

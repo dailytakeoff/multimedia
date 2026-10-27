@@ -37,6 +37,8 @@ public final class Settings {
 		String tvToken;
 		int tvPort = 25600;
 		int tvMonitor = 0;
+		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
+		String camDevice;
 		/** Ton beim Senden: all, except:<prog>, only:<prog>, off */
 		String tvSound = "all";
 		java.util.Set<String> tvInvited = new java.util.TreeSet<>();
@@ -166,6 +168,15 @@ public final class Settings {
 
 	public static int tvPort() {
 		return data.tvPort > 1024 && data.tvPort < 65536 ? data.tvPort : 25600;
+	}
+
+	public static String camDevice() {
+		return data.camDevice == null || data.camDevice.isBlank() ? null : data.camDevice;
+	}
+
+	public static void setCamDevice(String device) {
+		data.camDevice = device;
+		save();
 	}
 
 	public static int tvMonitor() {

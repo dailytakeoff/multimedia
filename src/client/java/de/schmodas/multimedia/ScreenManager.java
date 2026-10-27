@@ -161,6 +161,60 @@ public final class ScreenManager {
 		return new ArrayList<>(PLAYERS.keySet());
 	}
 
+	// ------------------------------------------------------------------ Touch screen
+
+	/**
+	 * Right-click on a screen's front: opens the touch screen for it (video controls, or remote control of a
+	 * friend's shared screen). Returns true if the click was on a screen and is handled.
+	 */
+	public static boolean touch(net.minecraft.world.phys.BlockHitResult hit) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null || SCREENS.isEmpty()) {
+			return false;
+		}
+		Vec3 at = hit.getLocation();
+		for (Map.Entry<BlockPos, Active> e : SCREENS.entrySet()) {
+			ScreenGeometry g = e.getValue().geometry();
+			if (hit.getDirection() != g.facing()) {
+				continue;
+			}
+			double dx = at.x - g.center().x;
+			double dy = at.y - g.center().y;
+			double dz = at.z - g.center().z;
+			double u = dx * g.right().getStepX() + dz * g.right().getStepZ();
+			double front = dx * g.facing().getStepX() + dz * g.facing().getStepZ();
+			if (Math.abs(u) > g.width() / 2.0 + 0.01 || Math.abs(dy) > g.height() / 2.0 + 0.01 || front < -1.2 || front > 0.3) {
+				continue;
+			}
+			Active screen = e.getValue();
+			ScreenSource source = screen.spec() == null ? null : PLAYERS.get(screen.spec());
+			Source video = null;
+			for (RadioManager.ScreenSign sign : RadioManager.screens()) {
+				if (sign.pos().equals(e.getKey())) {
+					video = sign.info().source();
+				}
+			}
+			// where on the picture (0..1, top left = 0,0), letterboxed to 16:9 like drawScreen
+			float aspect = VideoPlayer.WIDTH / (float) VideoPlayer.HEIGHT;
+			double vw = g.width();
+			double vh = vw / aspect;
+			if (vh > g.height()) {
+				vh = g.height();
+				vw = vh * aspect;
+			}
+			double pu = (u + vw / 2) / vw;
+			double pv = 1 - (dy + vh / 2) / vh;
+			mc.gui.setScreen(new TouchScreen(e.getKey(), screen.spec(), source, video, pu, pv));
+			return true;
+		}
+		return false;
+	}
+
+	/** The player behind a screen key (for the touch screen), or null. */
+	static ScreenSource player(String spec) {
+		return spec == null ? null : PLAYERS.get(spec);
+	}
+
 	// ------------------------------------------------------------------ Zeichnen
 
 	public static void render(LevelRenderContext ctx) {

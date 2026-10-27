@@ -40,6 +40,14 @@ final class LiveFeed {
 
 	final String key;
 	final String sender;
+	/** true: the sender's webcam (shown above their head), false: their screen share. */
+	final boolean cam;
+	/** Direct connection while it's up – used to send touch / remote-control events back to the sender. */
+	private volatile P2p.Endpoint liveEndpoint;
+	private volatile InetSocketAddress livePeer;
+	private volatile long liveSession;
+	/** Remote control: "none", "pending", "granted", "denied", "revoked". */
+	private volatile String control = "none";
 	/** Name wie im Spiel geschrieben (für Anzeigen und den Chat). */
 	private volatile String displayName;
 	private final Settings.TvSource target;
@@ -58,9 +66,10 @@ final class LiveFeed {
 	/** Wie viel später als bei Ankunft der Ton gerade in den Jukeboxen zu hören ist (geglättet). */
 	private volatile double audioLead = AUDIO_DELAY;
 
-	private LiveFeed(String key, String sender, Settings.TvSource target) {
+	private LiveFeed(String key, String sender, Settings.TvSource target, boolean cam) {
 		this.key = key;
 		this.sender = sender;
+		this.cam = cam;
 		this.displayName = sender;
 		this.target = target;
 		Thread t = new Thread(this::run, "MultiMedia-Live");
@@ -79,15 +88,23 @@ final class LiveFeed {
 	}
 
 	static String keyFor(String name, Settings.TvSource target) {
-		return "tv:" + name.toLowerCase(Locale.ROOT) + "@" + target.host() + ":" + target.port();
+		return keyFor(name, target, false);
+	}
+
+	static String keyFor(String name, Settings.TvSource target, boolean cam) {
+		return (cam ? "cam:" : "tv:") + name.toLowerCase(Locale.ROOT) + "@" + target.host() + ":" + target.port();
 	}
 
 	/** Verbindung holen (oder aufbauen); mit release() wieder abgeben. */
 	static synchronized LiveFeed acquire(String name, Settings.TvSource target) {
-		String key = keyFor(name, target);
+		return acquire(name, target, false);
+	}
+
+	static synchronized LiveFeed acquire(String name, Settings.TvSource target, boolean cam) {
+		String key = keyFor(name, target, cam);
 		LiveFeed f = FEEDS.get(key);
 		if (f == null) {
-			f = new LiveFeed(key, name, target);
+			f = new LiveFeed(key, name, target, cam);
 			FEEDS.put(key, f);
 		}
 		f.refs++;
@@ -106,6 +123,39 @@ final class LiveFeed {
 
 	String status() {
 		return status;
+	}
+
+	/** Is there a direct connection to a friend's screen right now (needed for remote control)? */
+	boolean canSendInput() {
+		return liveEndpoint != null && livePeer != null && !cam;
+	}
+
+	String controlState() {
+		return control;
+	}
+
+	/** Sends one touch / remote-control event to the sender (see RemoteControl for the format). */
+	void sendInput(String event) {
+		P2p.Endpoint ep = liveEndpoint;
+		InetSocketAddress to = livePeer;
+		if (ep == null || to == null || cam) {
+			return;
+		}
+		byte[] text = event.getBytes(StandardCharsets.UTF_8);
+		if (text.length > 900) {
+			return;
+		}
+		byte[] pkt = P2p.packet(P2p.INPUT, liveSession, text.length);
+		System.arraycopy(text, 0, pkt, P2p.HEADER, text.length);
+		ep.send(pkt, to);
+		if (event.equals("req") && control.equals("none")) {
+			control = "pending";
+		}
+	}
+
+	/** The feed for this key, if one is open (for the touch screen). */
+	static synchronized LiveFeed find(String key) {
+		return FEEDS.get(key);
 	}
 
 	boolean hasFrame() {
@@ -196,7 +246,7 @@ final class LiveFeed {
 			Socket s = new Socket();
 			socket = s;
 			try (s) {
-				s.connect(new InetSocketAddress(target.host(), target.port()), 4000);
+				s.connect(new InetSocketAddress(target.host(), cam ? target.port() + 1 : target.port()), 4000);
 				s.setTcpNoDelay(true);
 				s.setSoTimeout(8000);
 				OutputStream out = s.getOutputStream();
@@ -222,9 +272,13 @@ final class LiveFeed {
 
 	/** Der Sender meldet "ich sende jetzt" – wartende Leinwände sofort verbinden. */
 	static void wake(String sender) {
+		wake(sender, false);
+	}
+
+	static void wake(String sender, boolean cam) {
 		synchronized (LiveFeed.class) {
 			for (LiveFeed f : FEEDS.values()) {
-				if (f.sender.equalsIgnoreCase(sender) || TvSignal.LOOPBACK) {
+				if (f.cam == cam && (f.sender.equalsIgnoreCase(sender) || TvSignal.LOOPBACK)) {
 					f.wokenAt = System.nanoTime();
 				}
 			}
@@ -266,7 +320,7 @@ final class LiveFeed {
 					stun.mapped() == null ? "?" : P2p.format(stun.mapped()), stun.symmetric() ? ", Router wechselt Ports" : "");
 			TvSignal.Answer answer;
 			try {
-				answer = TvSignal.request(displayName, target.token(), session, mine).get(10, TimeUnit.SECONDS);
+				answer = TvSignal.request(displayName, target.token(), session, mine, cam).get(10, TimeUnit.SECONDS);
 			} catch (java.util.concurrent.TimeoutException e) {
 				status = T.t("Keine Antwort von ") + displayName + T.t(" (gleiche MultiMedia-Version?)");
 				pause(30_000);
@@ -312,6 +366,12 @@ final class LiveFeed {
 						}
 					}
 					case P2p.BYE -> rx.end();
+					case P2p.CONTROL -> {
+						String reply = new String(d, P2p.HEADER, d.length - P2p.HEADER, StandardCharsets.UTF_8).trim();
+						if (reply.matches("granted|denied|revoked|pending|unavailable")) {
+							control = reply;
+						}
+					}
 					default -> {
 					}
 				}
@@ -333,6 +393,9 @@ final class LiveFeed {
 			}
 			MultiMediaClient.LOGGER.info("Live ({}): direkt verbunden über {}", sender, P2p.format(peer.get()));
 			ep.send(punch, peer.get());
+			liveEndpoint = ep;
+			livePeer = peer.get();
+			liveSession = session;
 			// Lebenszeichen und Nachforderungen; ohne Daten 10 s -> Verbindung weg
 			Thread keep = new Thread(() -> {
 				long lastBeat = 0;
@@ -366,6 +429,9 @@ final class LiveFeed {
 			} finally {
 				keep.interrupt();
 				rx.end();
+				liveEndpoint = null;
+				livePeer = null;
+				control = "none";
 				ep.send(P2p.packet(P2p.BYE, session, 0), peer.get());
 				MultiMediaClient.LOGGER.info("Live ({}): getrennt ({})", sender, rx.stats());
 			}

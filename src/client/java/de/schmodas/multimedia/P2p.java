@@ -35,6 +35,10 @@ final class P2p {
 	static final byte NACK = 3;
 	static final byte HEARTBEAT = 4;
 	static final byte BYE = 5;
+	/** Viewer -> sender: a touch / remote-control event as UTF-8 text (see RemoteControl). */
+	static final byte INPUT = 6;
+	/** Sender -> viewer: remote-control answer ("granted", "denied", "revoked", "pending"). */
+	static final byte CONTROL = 7;
 	/** Kopf: Magic, Typ, Sitzung (8 Byte). */
 	static final int HEADER = 10;
 	/** Nutzdaten pro Paket: 6 MPEG-TS-Pakete (passt sicher in jede Internet-Leitung). */

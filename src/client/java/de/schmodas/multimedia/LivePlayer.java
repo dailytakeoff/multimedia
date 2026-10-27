@@ -16,8 +16,16 @@ public final class LivePlayer implements ScreenSource {
 	private final Identifier textureId;
 
 	LivePlayer(String sender, Settings.TvSource target) {
-		this.feed = LiveFeed.acquire(sender, target);
-		this.textureId = Identifier.fromNamespaceAndPath(MultiMediaClient.MOD_ID, "live/" + (nextId++));
+		this(sender, target, false);
+	}
+
+	LivePlayer(String sender, Settings.TvSource target, boolean cam) {
+		this.feed = LiveFeed.acquire(sender, target, cam);
+		this.textureId = Identifier.fromNamespaceAndPath(MultiMediaClient.MOD_ID, (cam ? "cam/" : "live/") + (nextId++));
+	}
+
+	LiveFeed feed() {
+		return feed;
 	}
 
 	@Override
