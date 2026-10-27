@@ -99,6 +99,8 @@ public class FloatEditScreen extends Screen {
 				() -> screen.y = Math.round((screen.y - 0.25) * 100) / 100.0, () -> screen.y = Math.round((screen.y + 0.25) * 100) / 100.0);
 		y = stepper(y, "Left / right", () -> String.format(Locale.ROOT, "%+.2f blocks", sideways),
 				() -> slide(-0.25), () -> slide(0.25));
+		y = stepper(y, "Back / forward", () -> String.format(Locale.ROOT, "%+.2f blocks", forward),
+				() -> push(-0.25), () -> push(0.25));
 		this.addRenderableWidget(Button.builder(Component.literal("Move to where I'm looking"), b -> FloatingScreens.placeInFront(screen))
 				.bounds(left, y, 152, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Turn to face me"), b -> FloatingScreens.faceMe(screen))
@@ -148,6 +150,18 @@ public class FloatEditScreen extends Screen {
 			FloatingScreens.remove(screen);
 			Minecraft.getInstance().gui.setScreen(parent);
 		}).bounds(cx + 55, bottom, 100, 20).build());
+	}
+
+	/** How far the screen was moved towards its front in this editor (for the label). */
+	private double forward;
+
+	/** Moves the screen towards (+) or away from (−) the side its picture faces. */
+	private void push(double blocks) {
+		double th = Math.toRadians(screen.yaw);
+		// the picture faces (sin yaw, 0, cos yaw)
+		screen.x = Math.round((screen.x + Math.sin(th) * blocks) * 100) / 100.0;
+		screen.z = Math.round((screen.z + Math.cos(th) * blocks) * 100) / 100.0;
+		forward += blocks;
 	}
 
 	/** How far the screen was moved sideways in this editor (for the label). */
