@@ -22,23 +22,57 @@ import java.util.function.IntConsumer;
  */
 public class MenuScreen extends Screen {
 	// ---- colours
-	private static final int BG = 0xF2141416;
-	private static final int SIDEBAR = 0xFF19191C;
-	private static final int HEADER = 0xFF1D1D21;
+	private static int BG = 0xF2141416;
+	private static int SIDEBAR = 0xFF19191C;
+	private static int HEADER = 0xFF1D1D21;
 	private static final int ACTIVE_ROW = 0xFF232328;
 	private static final int LINE = 0xFF34343B;
 	private static final int TEXT = 0xFFE8E8EC;
 	private static final int DIM = 0xFF9C9CA6;
-	private static final int ACCENT = 0xFF9B6BFF;
-	private static final int BUTTON = 0xFF46396A;
-	private static final int BUTTON_HOVER = 0xFF574683;
+	private static int ACCENT = 0xFF9B6BFF;
+	private static int BUTTON = 0xFF46396A;
+	private static int BUTTON_HOVER = 0xFF574683;
+
+	/** Accent colours: name, accent (borders, active tab), button, button when hovered. */
+	private record Accent(String name, int accent, int button, int hover) {
+	}
+
+	private static final List<Accent> ACCENTS = List.of(
+			new Accent("Purple", 0xFF9B6BFF, 0xFF46396A, 0xFF574683),
+			new Accent("Blue", 0xFF4F8DFF, 0xFF2D4470, 0xFF38558C),
+			new Accent("Green", 0xFF3FCF7A, 0xFF235A3A, 0xFF2C7149),
+			new Accent("Red", 0xFFFF5B5B, 0xFF6A2F33, 0xFF853B40),
+			new Accent("Orange", 0xFFFF9A3C, 0xFF6A4423, 0xFF85562C),
+			new Accent("Pink", 0xFFFF6FC3, 0xFF6A3155, 0xFF853D6B),
+			new Accent("Teal", 0xFF33D1C9, 0xFF1F5754, 0xFF286D69),
+			new Accent("White", 0xFFE8E8EC, 0xFF45454D, 0xFF56565F));
+
+	/** Panel styles: name, background, sidebar, header. */
+	private record Panel(String name, int bg, int sidebar, int header) {
+	}
+
+	private static final List<Panel> PANELS = List.of(
+			new Panel("Dark", 0xF2141416, 0xFF19191C, 0xFF1D1D21),
+			new Panel("Black", 0xFA070708, 0xFF0C0C0E, 0xFF111114),
+			new Panel("See-through", 0xB0141416, 0xC019191C, 0xC81D1D21));
+
+	private static void applyTheme() {
+		Accent a = ACCENTS.get(Math.min(Settings.uiAccent(), ACCENTS.size() - 1));
+		ACCENT = a.accent();
+		BUTTON = a.button();
+		BUTTON_HOVER = a.hover();
+		Panel p = PANELS.get(Math.min(Settings.uiPanel(), PANELS.size() - 1));
+		BG = p.bg();
+		SIDEBAR = p.sidebar();
+		HEADER = p.header();
+	}
 	private static final int FIELD = 0xFF2A2A30;
 	private static final int FIELD_HOVER = 0xFF33333A;
 	private static final int DANGER = 0xFF6A2F36;
 	private static final int DANGER_HOVER = 0xFF853B44;
 
 	private enum Page {
-		LIVE("Live"), SCREENS("Screens"), FRIENDS("Friends"), SETTINGS("Settings"), HELP("How it works");
+		LIVE("Live"), SCREENS("Screens"), FRIENDS("Friends"), SETTINGS("Settings"), COLOURS("Colours"), HELP("How it works");
 
 		final String title;
 
@@ -158,6 +192,7 @@ public class MenuScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float a) {
 		super.extractRenderState(g, mx, my, a);
+		applyTheme();
 		this.mouseX = mx;
 		this.mouseY = my;
 		hits.clear();
@@ -172,7 +207,7 @@ public class MenuScreen extends Screen {
 		g.fill(px, py, px + SIDE_W, py + ph, SIDEBAR);
 		g.fill(px + SIDE_W, py, px + pw, py + HEAD_H, HEADER);
 		g.fill(px, py, px + SIDE_W, py + HEAD_H, HEADER);
-		g.text(this.font, "MultiMedia", px + 10, py + 8, TEXT, false);
+		g.text(this.font, "Sharing Craft", px + 10, py + 8, TEXT, false);
 		g.text(this.font, page.title, px + SIDE_W + 12, py + 8, TEXT, false);
 		// status + close
 		boolean live = TvSender.isSending() || TvSender.isCamOn();
@@ -220,6 +255,7 @@ public class MenuScreen extends Screen {
 			case SCREENS -> cy = drawScreens(g, cx, cy, cw);
 			case FRIENDS -> cy = drawFriends(g, cx, cy, cw);
 			case SETTINGS -> cy = drawSettings(g, cx, cy, cw);
+			case COLOURS -> cy = drawColours(g, cx, cy, cw);
 			case HELP -> cy = drawHelp(g, cx, cy, cw);
 		}
 		g.disableScissor();
@@ -645,6 +681,41 @@ public class MenuScreen extends Screen {
 				Minecraft.getInstance().gui.setScreen(new SettingsScreen(this)));
 		g.text(this.font, "Menu key: M (change it under Options → Controls).", x, y + 2, DIM, false);
 		return y + 14;
+	}
+
+	// ------------------------------------------------------------------ Colours
+
+	private int drawColours(GuiGraphicsExtractor g, int x, int y, int w) {
+		y = section(g, x, y, w, "Accent colour");
+		int sw = 36;
+		int gap = (w - 4 * sw) / 3;
+		for (int i = 0; i < ACCENTS.size(); i++) {
+			Accent a = ACCENTS.get(i);
+			int col = i % 4;
+			int row = i / 4;
+			int sx = x + col * (sw + gap);
+			int sy = y + row * 38;
+			boolean on = Settings.uiAccent() == i;
+			boolean h = hover(sx, sy, sw, 22);
+			g.fill(sx - 2, sy - 2, sx + sw + 2, sy + 24, on ? TEXT : h ? LINE : 0x00000000);
+			g.fill(sx, sy, sx + sw, sy + 22, a.button());
+			g.fill(sx, sy, sx + sw, sy + 4, a.accent());
+			int tw = this.font.width(a.name());
+			g.text(this.font, a.name(), sx + (sw - tw) / 2, sy + 26, on ? a.accent() : DIM, false);
+			int index = i;
+			hits.add(new Hit(sx, sy, sw, 36, () -> Settings.setUiAccent(index)));
+		}
+		y += 80;
+		y = section(g, x, y, w, "Panel");
+		label(g, x, y, "Background");
+		List<String> names = new ArrayList<>();
+		PANELS.forEach(p -> names.add(p.name()));
+		field(g, x + w / 2 - 10, y, w - (w / 2 - 10), PANELS.get(Math.min(Settings.uiPanel(), PANELS.size() - 1)).name(), names,
+				Settings::setUiPanel);
+		y += 26;
+		y = bigButton(g, x, y, w, "Preview button", false, true, () -> {
+		});
+		return y;
 	}
 
 	// ------------------------------------------------------------------ Help

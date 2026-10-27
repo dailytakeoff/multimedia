@@ -2,12 +2,14 @@
 	"schemaVersion": 1,
 	"id": "multimedia",
 	"version": "${version}",
-	"name": "MultiMedia",
-	"description": "YouTube on jukeboxes and block-wall screens, in sync for everyone with the mod - plus live streaming of your own monitor onto in-game screens. Client-side only.",
-	"authors": ["Schmodas"],
+	"name": "Sharing Craft",
+	"description": "Free screen sharing, webcams above heads, floating screens and YouTube in Minecraft - Windows and Linux, client-side only. Based on MultiMedia by Schmodas (MIT).",
+	"authors": ["dailytakeoff"],
+	"contributors": ["Schmodas (original MultiMedia mod)"],
 	"license": "MIT",
 	"contact": {
-		"homepage": "https://modrinth.com/mod/multimedia-cinema"
+		"homepage": "https://github.com/dailytakeoff/multimedia",
+		"sources": "https://github.com/dailytakeoff/multimedia"
 	},
 	"icon": "assets/multimedia/icon.png",
 	"environment": "client",

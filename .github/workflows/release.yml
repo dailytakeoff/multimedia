@@ -1,5 +1,5 @@
-# Publishing a GitHub release builds the mod from this exact source and uploads
-# the resulting jar to Modrinth and to the GitHub release. No files are uploaded by hand.
+# Publishing a GitHub release (tag v<version>, e.g. v0.4-alpha) builds the mod from this exact source
+# and attaches the jar to that release. No files are uploaded by hand.
 name: release
 on:
   release:
@@ -18,7 +18,20 @@ jobs:
           distribution: temurin
           java-version: '25'
       - name: Install MinGW-w64
-        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # llvm-mingw from GitHub (Ubuntu's mirrors are sometimes unreachable from the runners); apt as fallback
+          url=$(gh api repos/mstorsjo/llvm-mingw/releases/latest \
+            --jq '.assets[] | select(.name | test("ucrt-ubuntu-22.04-x86_64.tar.xz$")) | .browser_download_url' | head -1)
+          if [ -n "$url" ] && curl -fsSL --retry 3 "$url" -o /tmp/llvm-mingw.tar.xz; then
+            mkdir -p /tmp/llvm-mingw && tar -xJf /tmp/llvm-mingw.tar.xz -C /tmp/llvm-mingw --strip-components=1
+            echo "/tmp/llvm-mingw/bin" >> "$GITHUB_PATH"
+            exit 0
+          fi
+          timeout 300 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          timeout 300 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends g++-mingw-w64-x86-64
       - name: Build audio helper from native/mmaudio.cpp
         run: ./scripts/build-audio-helper.sh
       - name: Build mod
@@ -29,7 +42,7 @@ jobs:
           version=$(grep '^version=' gradle.properties | cut -d= -f2)
           tag="${GITHUB_REF_NAME#v}"
           if [ "$version" != "$tag" ]; then echo "Tag $GITHUB_REF_NAME does not match version=$version"; exit 1; fi
-          jar="build/libs/multimedia-$version.jar"
+          jar="build/libs/SharingCraft-$version.jar"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "jar=$jar" >> "$GITHUB_OUTPUT"
           sha256sum "$jar" src/client/resources/multimedia/mmaudio.exe
@@ -37,31 +50,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "${{ steps.jar.outputs.jar }}" --clobber
-      - name: Publish to Modrinth
-        env:
-          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-          CHANGELOG: ${{ github.event.release.body }}
-          VERSION: ${{ steps.jar.outputs.version }}
-          JAR: ${{ steps.jar.outputs.jar }}
-        run: |
-          data=$(jq -n --arg v "$VERSION" --arg c "$CHANGELOG" --arg f "$(basename "$JAR")" '{
-            project_id: "DS5qgGwY",
-            name: ("MultiMedia " + $v),
-            version_number: $v,
-            changelog: $c,
-            game_versions: ["26.3"],
-            loaders: ["fabric"],
-            version_type: "release",
-            featured: true,
-            dependencies: [
-              {project_id: "P7dR8mSH", dependency_type: "required"},
-              {project_id: "mOgUt4GM", dependency_type: "optional"}
-            ],
-            file_parts: ["file"],
-            primary_file: "file"
-          }')
-          curl --fail-with-body -sS -X POST https://api.modrinth.com/v2/version \
-            -H "Authorization: $MODRINTH_TOKEN" \
-            -H "User-Agent: Schmodas/multimedia (github.com/Schmodas/multimedia)" \
-            --form-string "data=$data" \
-            -F "file=@$JAR;filename=$(basename "$JAR")"

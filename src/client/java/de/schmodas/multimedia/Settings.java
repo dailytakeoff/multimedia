@@ -39,6 +39,9 @@ public final class Settings {
 		int tvMonitor = 0;
 		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
 		String camDevice;
+		/** Menu colours: accent colour and panel style (see MenuScreen.ACCENTS / PANELS). */
+		int uiAccent = 0;
+		int uiPanel = 0;
 		/** Volume of everything the mod plays, 0–100. */
 		int masterVolume = 100;
 		/** Your own volume per floating screen ("owner/id" -> 0–100). */
@@ -271,6 +274,24 @@ public final class Settings {
 			data.tvSources = new java.util.TreeMap<>();
 		}
 		data.tvSources.put(player.toLowerCase(java.util.Locale.ROOT), source);
+		save();
+	}
+
+	public static int uiAccent() {
+		return Math.max(0, data.uiAccent);
+	}
+
+	public static void setUiAccent(int i) {
+		data.uiAccent = i;
+		save();
+	}
+
+	public static int uiPanel() {
+		return Math.max(0, data.uiPanel);
+	}
+
+	public static void setUiPanel(int i) {
+		data.uiPanel = i;
 		save();
 	}
 
