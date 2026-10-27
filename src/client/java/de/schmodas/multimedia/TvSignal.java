@@ -157,13 +157,8 @@ final class TvSignal {
 			t.start();
 			return;
 		}
-		Minecraft mc = Minecraft.getInstance();
-		mc.execute(() -> {
-			var conn = mc.getConnection();
-			if (conn != null) {
-				conn.sendCommand("msg " + to + " [MultiMedia] " + code);
-			}
-		});
+		// rate-limited so the server never kicks for spam; connection messages go first
+		ChatQueue.urgent("msg " + to + " [MultiMedia] " + code);
 	}
 
 	/** Ist der Spieler gerade auf dem Server? (Sonst gar nicht erst anfragen.) */

@@ -66,7 +66,7 @@ public final class TvInvite {
 		String me = Minecraft.getInstance().getUser().getName();
 		String code = encode(me, Settings.tvToken());
 		for (String p : players) {
-			conn.sendCommand("msg " + p + " [MultiMedia] Bildschirm-Einladung " + code);
+			ChatQueue.normal("msg " + p + " [MultiMedia] Bildschirm-Einladung " + code, "invite:" + p.toLowerCase(java.util.Locale.ROOT));
 		}
 		MultiMediaClient.status(T.t("Einladung geschickt an: ") + String.join(", ", players));
 	}

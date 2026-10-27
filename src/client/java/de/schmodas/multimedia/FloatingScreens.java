@@ -119,6 +119,8 @@ public final class FloatingScreens {
 	/** "Hello, I have the mod" – sent back once to someone whose screen we got, so they know us too. */
 	private static final Pattern HELLO = Pattern.compile("mmfh1:([A-Za-z0-9_-]{4,})");
 	private static final Pattern ANY = Pattern.compile("mmf[sdh]1:");
+	/** Players invited from floating screens this session (lower case). */
+	private static final Set<String> INVITED = new HashSet<>();
 	/** Players we've said hello to this session (lower case). */
 	private static final Set<String> GREETED = new HashSet<>();
 	private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
@@ -204,7 +206,12 @@ public final class FloatingScreens {
 		// for your own screen share / webcam, make sure the people who see it can actually connect
 		String mine = me();
 		if (d.content.equalsIgnoreCase("tv:" + mine) || d.content.equalsIgnoreCase("cam:" + mine)) {
-			List<String> to = recipients(d);
+			List<String> to = new ArrayList<>();
+			for (String p : recipients(d)) {
+				if (INVITED.add(p.toLowerCase(Locale.ROOT))) {
+					to.add(p); // invite each player at most once per session
+				}
+			}
 			if (!to.isEmpty()) {
 				TvInvite.send(to);
 			}
@@ -220,7 +227,7 @@ public final class FloatingScreens {
 		}
 		for (String p : onlineNames()) {
 			if (!p.equalsIgnoreCase(me()) && (ModPeers.has(p) || containsIgnoreCase(d.friends, p))) {
-				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id));
+				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id), d.id);
 			}
 		}
 	}
@@ -316,9 +323,9 @@ public final class FloatingScreens {
 				continue;
 			}
 			if (sees(d, p)) {
-				whisper(p, code);
+				whisper(p, code, d.id);
 			} else if (ModPeers.has(p)) {
-				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id)); // no longer sees it: remove it for them
+				whisper(p, "mmfd1:" + b64(d.owner + "|" + d.id), d.id); // no longer sees it: remove it for them
 			}
 		}
 	}
@@ -421,7 +428,7 @@ public final class FloatingScreens {
 	/** Once per session: tell a player whose screen we got that we have the mod (so we get their "everyone" screens too). */
 	private static void greet(String owner) {
 		if (GREETED.add(owner.toLowerCase(Locale.ROOT))) {
-			whisper(owner, "mmfh1:" + b64(me()));
+			whisper(owner, "mmfh1:" + b64(me()), "hello");
 		}
 	}
 
@@ -437,18 +444,15 @@ public final class FloatingScreens {
 		return s != null && !s.isLive();
 	}
 
-	private static void whisper(String to, String code) {
-		Minecraft mc = Minecraft.getInstance();
-		var conn = mc.getConnection();
+	/** Queued and rate-limited (ChatQueue); a newer message for the same screen and player replaces a waiting one. */
+	private static void whisper(String to, String code, String screenId) {
 		String command = "msg " + to + " [MultiMedia] " + code;
 		if (command.length() > 255) {
 			MultiMediaClient.LOGGER.warn("Schwebende Leinwand: Nachricht zu lang ({} Zeichen) – nicht gesendet", command.length());
 			MultiMediaClient.error("This floating screen's link is too long to send to others.");
 			return;
 		}
-		if (conn != null) {
-			conn.sendCommand(command);
-		}
+		ChatQueue.normal(command, "fs:" + to.toLowerCase(Locale.ROOT) + ":" + screenId);
 	}
 
 	private static List<String> onlineNames() {
@@ -594,7 +598,7 @@ public final class FloatingScreens {
 			SENT_TO.add(low);
 			for (FloatData d : OWN) {
 				if (sees(d, p)) {
-					whisper(p, encode(d));
+					whisper(p, encode(d), d.id);
 				}
 			}
 		}
