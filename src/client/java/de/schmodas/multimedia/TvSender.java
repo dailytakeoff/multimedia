@@ -513,12 +513,17 @@ public final class TvSender {
 				out.add(new Variant("Webcam " + d, List.of("-f", "dshow", "-rtbufsize", "64M", "-i", "video=" + d), concat(vf, x264)));
 			}
 		} else {
-			if (devices.isEmpty()) {
-				devices.addAll(camDevices(null));
+			// chosen device first, then every other one (a webcam often has a second, picture-less node)
+			for (String d : camDevices(null)) {
+				if (!devices.contains(d)) {
+					devices.add(d);
+				}
 			}
 			for (String d : devices) {
-				// metadata nodes (/dev/video1 next to /dev/video0) fail right away and are skipped
-				out.add(new Variant("Webcam " + d, List.of("-f", "v4l2", "-framerate", "30", "-i", d), concat(vf, x264)));
+				// MJPEG first: most USB webcams only do 30 fps at higher sizes that way; then whatever the camera offers
+				out.add(new Variant("Webcam " + d + " (MJPEG)", List.of("-f", "v4l2", "-input_format", "mjpeg",
+						"-video_size", "1280x720", "-framerate", "30", "-i", d), concat(vf, x264)));
+				out.add(new Variant("Webcam " + d, List.of("-f", "v4l2", "-i", d), concat(vf, x264)));
 			}
 		}
 		return out;
