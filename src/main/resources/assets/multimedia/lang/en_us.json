@@ -38,5 +38,6 @@
  "multimedia.options.screen_brightness": "Screen brightness",
  "multimedia.options.screen_brightness.tooltip": "How bright the video on screens is. With shaders it often looks overexposed – try about 60–75 %.",
  "multimedia.options.lean_view": "Jukebox view",
- "multimedia.options.lean_view.tooltip": "Right-click a jukebox: the camera leans over it, where you pick discs, edit the sign and control playback. Sneak + right-click works as usual."
+ "multimedia.options.lean_view.tooltip": "Right-click a jukebox: the camera leans over it, where you pick discs, edit the sign and control playback. Sneak + right-click works as usual.",
+ "key.multimedia.menu": "MultiMedia menu"
 }

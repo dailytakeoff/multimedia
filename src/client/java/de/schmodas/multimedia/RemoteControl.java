@@ -171,6 +171,29 @@ public final class RemoteControl {
 		}
 	}
 
+	/** Players waiting for an answer (for the menu). */
+	public static List<String> pending() {
+		List<String> out = new ArrayList<>();
+		long now = System.currentTimeMillis();
+		for (Map.Entry<String, Long> e : ASKED.entrySet()) {
+			if (now - e.getValue() < 10 * 60_000 && !ALLOWED.contains(e.getKey())) {
+				out.add(NAMES.getOrDefault(e.getKey(), e.getKey()));
+			}
+		}
+		out.sort(String.CASE_INSENSITIVE_ORDER);
+		return out;
+	}
+
+	/** Players who may control this PC (for the menu). */
+	public static List<String> allowed() {
+		List<String> out = new ArrayList<>();
+		for (String key : ALLOWED) {
+			out.add(NAMES.getOrDefault(key, key));
+		}
+		out.sort(String.CASE_INSENSITIVE_ORDER);
+		return out;
+	}
+
 	/** "Alex, Sam" while someone may control this PC, else null (for the HUD). */
 	public static String activeSummary() {
 		if (ALLOWED.isEmpty()) {

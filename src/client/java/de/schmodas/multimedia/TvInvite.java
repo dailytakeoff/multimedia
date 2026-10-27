@@ -24,6 +24,13 @@ public final class TvInvite {
 	public record Invite(String name, String host, int port, String token) {
 	}
 
+	/** Invites that arrived and haven't been accepted yet: player name -> code (for the menu). */
+	private static final java.util.Map<String, String> PENDING = new java.util.concurrent.ConcurrentHashMap<>();
+
+	public static java.util.Map<String, String> pending() {
+		return new java.util.TreeMap<>(PENDING);
+	}
+
 	private TvInvite() {
 	}
 
@@ -94,6 +101,7 @@ public final class TvInvite {
 		if (same) {
 			return; // schon angenommen
 		}
+		PENDING.put(inv.name(), m.group());
 		Component button = Component.literal(T.t("[Annehmen]")).withStyle(s -> s
 				.withColor(ChatFormatting.GREEN)
 				.withClickEvent(new ClickEvent.SuggestCommand((T.german() ? "/mm tv annehmen " : "/mm tv accept ") + m.group()))
@@ -115,6 +123,7 @@ public final class TvInvite {
 			return false;
 		}
 		Settings.setTvSource(inv.name(), new Settings.TvSource(inv.host(), inv.port(), inv.token()));
+		PENDING.remove(inv.name());
 		return true;
 	}
 

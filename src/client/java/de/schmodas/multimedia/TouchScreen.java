@@ -26,8 +26,11 @@ public class TouchScreen extends Screen {
 	private static final int TEX_W = VideoPlayer.WIDTH;
 	private static final int TEX_H = VideoPlayer.HEIGHT;
 
-	private final BlockPos signPos;
-	private final String spec;
+	/** Runs "pause", "resume", "restart", "next", "prev" for everyone; null = you can't control this video. */
+	private final java.util.function.Consumer<String> actions;
+	private final boolean allowSkip;
+	/** Whose screen it is, if you can't control it (shown in the headline). */
+	private final String ownerName;
 	private final ScreenSource source;
 	/** YouTube video on this screen's own sign (controllable), or null. */
 	private final Source video;
@@ -38,10 +41,17 @@ public class TouchScreen extends Screen {
 	private String lastControl = "";
 	private Button requestButton;
 
+	/** Screen on a wall with a sign: video controls change the sign (works for everyone who can edit it). */
 	TouchScreen(BlockPos signPos, String spec, ScreenSource source, Source video, double tapU, double tapV) {
+		this(source, video, a -> LeanView.signActionAt(Minecraft.getInstance(), signPos, a), true, null, tapU, tapV);
+	}
+
+	TouchScreen(ScreenSource source, Source video, java.util.function.Consumer<String> actions, boolean allowSkip,
+			String ownerName, double tapU, double tapV) {
 		super(Component.literal("Touch screen"));
-		this.signPos = signPos;
-		this.spec = spec;
+		this.actions = actions;
+		this.allowSkip = allowSkip;
+		this.ownerName = ownerName;
 		this.source = source;
 		this.video = video != null && !video.isLive() ? video : null;
 		this.feed = source instanceof LivePlayer lp ? lp.feed() : null;
@@ -87,9 +97,14 @@ public class TouchScreen extends Screen {
 	protected void init() {
 		int y = this.height - 30;
 		int cx = this.width / 2;
+		if (video != null && actions == null) {
+			this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
+					.bounds(cx - 31, y, 62, 20).build());
+			return;
+		}
 		if (video != null) {
 			boolean paused = video.isPaused();
-			if (video.playlist()) {
+			if (video.playlist() && allowSkip) {
 				this.addRenderableWidget(Button.builder(Component.literal("◀◀"), b -> action("prev"))
 						.bounds(cx - 154, y, 44, 20).tooltip(Tooltip.create(Component.literal("Previous track – for everyone"))).build());
 				this.addRenderableWidget(Button.builder(Component.literal("▶▶"), b -> action("next"))
@@ -127,7 +142,9 @@ public class TouchScreen extends Screen {
 	private void action(String action) {
 		Minecraft mc = Minecraft.getInstance();
 		onClose();
-		mc.execute(() -> LeanView.signActionAt(mc, signPos, action));
+		if (actions != null) {
+			mc.execute(() -> actions.accept(action));
+		}
 	}
 
 	@Override
@@ -162,6 +179,9 @@ public class TouchScreen extends Screen {
 	}
 
 	private String headline() {
+		if (video != null && actions == null) {
+			return "Only " + (ownerName == null ? "its owner" : ownerName) + " can control this screen";
+		}
 		if (video != null) {
 			return "Tap the picture to " + (video.isPaused() ? "play" : "pause") + " – controls work for everyone";
 		}
@@ -192,7 +212,9 @@ public class TouchScreen extends Screen {
 			return false;
 		}
 		if (video != null) {
-			action(video.isPaused() ? "resume" : "pause");
+			if (actions != null) {
+				action(video.isPaused() ? "resume" : "pause");
+			}
 			return true;
 		}
 		if (controlling()) {

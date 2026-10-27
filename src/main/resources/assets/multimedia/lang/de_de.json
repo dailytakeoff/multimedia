@@ -38,5 +38,6 @@
  "multimedia.options.screen_brightness": "Leinwand-Helligkeit",
  "multimedia.options.screen_brightness.tooltip": "Wie hell das Video auf der Leinwand ist. Mit Shadern wirkt es oft überbelichtet – dann etwa 60–75 % einstellen.",
  "multimedia.options.lean_view": "Jukebox-Ansicht",
- "multimedia.options.lean_view.tooltip": "Rechtsklick auf eine Jukebox: Die Kamera beugt sich drüber, dort wählst du Platten, bearbeitest das Schild und steuerst die Wiedergabe. Schleichen + Rechtsklick wirkt wie immer."
+ "multimedia.options.lean_view.tooltip": "Rechtsklick auf eine Jukebox: Die Kamera beugt sich drüber, dort wählst du Platten, bearbeitest das Schild und steuerst die Wiedergabe. Schleichen + Rechtsklick wirkt wie immer.",
+ "key.multimedia.menu": "MultiMedia-Menü"
 }

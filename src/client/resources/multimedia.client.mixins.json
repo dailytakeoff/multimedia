@@ -14,7 +14,8 @@
 		"CameraMixin",
 		"GameModeMixin",
 		"HudMixin",
-		"HandsMixin"
+		"HandsMixin",
+		"MinecraftUseMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

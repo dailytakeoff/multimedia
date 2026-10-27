@@ -39,6 +39,8 @@ public final class Settings {
 		int tvMonitor = 0;
 		/** Webcam device (Windows: dshow name, Linux: /dev/videoN); null = first one found. */
 		String camDevice;
+		/** Own floating screens per server address. */
+		java.util.Map<String, java.util.List<FloatingScreens.FloatData>> floating = new java.util.HashMap<>();
 		/** Ton beim Senden: all, except:<prog>, only:<prog>, off */
 		String tvSound = "all";
 		java.util.Set<String> tvInvited = new java.util.TreeSet<>();
@@ -168,6 +170,26 @@ public final class Settings {
 
 	public static int tvPort() {
 		return data.tvPort > 1024 && data.tvPort < 65536 ? data.tvPort : 25600;
+	}
+
+	public static synchronized java.util.List<FloatingScreens.FloatData> floating(String server) {
+		if (data.floating == null) {
+			return java.util.List.of();
+		}
+		java.util.List<FloatingScreens.FloatData> l = data.floating.get(server);
+		return l == null ? java.util.List.of() : new java.util.ArrayList<>(l);
+	}
+
+	public static synchronized void setFloating(String server, java.util.List<FloatingScreens.FloatData> screens) {
+		if (data.floating == null) {
+			data.floating = new java.util.HashMap<>();
+		}
+		if (screens.isEmpty()) {
+			data.floating.remove(server);
+		} else {
+			data.floating.put(server, screens);
+		}
+		save();
 	}
 
 	public static String camDevice() {

@@ -23,6 +23,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 public class MultiMediaClient implements ClientModInitializer {
 	public static final String MOD_ID = "multimedia";
 	public static final Logger LOGGER = LoggerFactory.getLogger("MultiMedia");
+	private static net.minecraft.client.KeyMapping MENU_KEY;
 
 	@Override
 	public void onInitializeClient() {
@@ -30,6 +31,18 @@ public class MultiMediaClient implements ClientModInitializer {
 		SettingsShare.register();
 		TvInvite.register();
 		TvSignal.register();
+		FloatingScreens.register();
+		// menu hotkey (M by default, changeable under Controls)
+		MENU_KEY = net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper.registerKeyMapping(new net.minecraft.client.KeyMapping(
+				"key.multimedia.menu", com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD,
+				org.lwjgl.sdl.SDLScancode.SDL_SCANCODE_M, net.minecraft.client.KeyMapping.Category.MISC));
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			while (MENU_KEY.consumeClick()) {
+				if (mc.gui.screen() == null && mc.player != null) {
+					mc.gui.setScreen(new MenuScreen());
+				}
+			}
+		});
 		// Anzeige oben links, solange man sendet
 		net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry.addLast(
 				net.minecraft.resources.Identifier.fromNamespaceAndPath(MOD_ID, "sending"), (g, dt) -> {
@@ -60,6 +73,7 @@ public class MultiMediaClient implements ClientModInitializer {
 				JukeboxVisuals.clear(client);
 				ScreenManager.closeAll();
 				CamManager.closeAll();
+				FloatingScreens.closeAll();
 			});
 		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
@@ -77,9 +91,11 @@ public class MultiMediaClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(JukeboxVisuals::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(ScreenManager::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(CamManager::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(FloatingScreens::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(LeanView::tick);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(ScreenManager::render);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(CamManager::render);
+		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(FloatingScreens::render);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(LeanRender::render);
 		net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.COLLECT_SUBMITS.register(LeanHands::render);
 	}
@@ -175,6 +191,12 @@ public class MultiMediaClient implements ClientModInitializer {
 							TvInvite.send(java.util.List.of(StringArgumentType.getString(c, "spieler")));
 							return 1;
 						}))))
+				.then(literal("menu").executes(c -> {
+					// opened next tick: the chat screen closes right after the command
+					Minecraft mc = Minecraft.getInstance();
+					StreamWatcher.later(50, () -> mc.gui.setScreen(new MenuScreen()));
+					return 1;
+				}))
 				.then(literal("cam")
 						.executes(c -> {
 							status(TvSender.isCamOn() ? "Webcam is on. /mm cam off to stop."
@@ -290,7 +312,7 @@ public class MultiMediaClient implements ClientModInitializer {
 	}
 
 	/** Starts the webcam and re-sends invites to the invited players who are online. */
-	private static int camOn() {
+	static int camOn() {
 		status("Starting webcam …");
 		TvSender.startCam(Settings.camDevice(), MultiMediaClient::status, () -> {
 			status("Webcam on. Players you've invited (/mm tv invite <player>) see it above your head.");
@@ -377,6 +399,7 @@ public class MultiMediaClient implements ClientModInitializer {
 		line(T.t("/disc titel an | aus"), T.t("Songtitel über der Jukebox zeigen oder ausblenden"));
 		line(T.t("/disc aus | an"), T.t("MultiMedia für dich aus- oder einschalten"));
 		line(T.t("/disc update"), T.t("yt-dlp aktualisieren, falls YouTube streikt"));
+		line("M  or  /mm menu", "menu for everything: share screen, webcam, floating screens, remote control, invites");
 		line("/mm cam on | off", "webcam above your head for players you invited (/mm cam devices to pick one)");
 		line("Right-click a screen", "touch screen: video controls, or control a friend's PC if they allow it");
 		line("/mm control off", "stop everyone from controlling your PC");
